@@ -715,27 +715,6 @@ ${formattingRules}
 ${seoBlock}`;
         }
 
-        case 'event_description':
-            return `**CONTENT BRIEF:**
-- Event: ${title}
-- Type: ${m.event_type || 'Webinar'}
-- Date & Time: ${m.date_time || 'TBC'}
-- Speakers: ${m.speakers || 'TBC'}
-- Key Takeaways: ${m.key_takeaways || 'Not specified'}
-- Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 600} words
-
-**EVENT DESCRIPTION REQUIREMENTS:**
-1. Open with a compelling hook — why this event matters right now
-2. ## What You'll Learn — 4-6 bullet points of key takeaways
-3. ## Who Should Attend — paint a picture of the ideal attendee
-4. ## Meet the Speaker(s) — brief bio placeholder for ${m.speakers || 'each speaker'}
-5. ## Event Details — date, time, format (online/in-person), duration
-6. Strong registration CTA — create urgency without being pushy
-7. Tone: exciting and inviting — make people feel they can't miss this
-${formattingRules}
-${seoBlock}`;
-
         case 'policy_procedure':
             return `**CONTENT BRIEF:**
 - Policy: ${m.policy_type || title}

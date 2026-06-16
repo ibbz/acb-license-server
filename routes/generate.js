@@ -296,7 +296,8 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
         },
         body: JSON.stringify({
             model: 'claude-sonnet-4-5',
-            max_tokens: 8192,
+            max_tokens: 16000,
+            temperature: 0.7,
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
         }),
