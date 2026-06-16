@@ -10,7 +10,14 @@ const { Resend } = require('resend');
 const { Pool }   = require('pg');
 
 const pool    = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const resend  = new Resend(process.env.RESEND_API_KEY);
+// Lazy, guarded Resend client — keeps the server booting even if
+// RESEND_API_KEY is unset; email simply no-ops until the key is configured.
+let _resend = null;
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 const JWT_SECRET = process.env.PORTAL_JWT_SECRET || process.env.ADMIN_SECRET;
 
 // ── POST /api/portal/magic-request ───────────────────────────────────────
@@ -58,7 +65,7 @@ router.post('/magic-request', async (req, res) => {
     const baseUrl = process.env.LB_PORTAL_URL || 'https://app.learn-bridge.com';
     const link    = `${baseUrl}/lb-portal?magic=${token}`;
 
-    await resend.emails.send({
+    await getResend()?.emails.send({
       from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
       to:      email,
       subject: 'Your sign-in link — LearnBridge',

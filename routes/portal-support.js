@@ -8,7 +8,14 @@ const { Pool }   = require('pg');
 const { requireAuth } = require('./portal-auth');
 
 const pool   = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy, guarded Resend client — keeps the server booting even if
+// RESEND_API_KEY is unset; email simply no-ops until the key is configured.
+let _resend = null;
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 router.post('/', requireAuth, async (req, res) => {
   const { category, subject, description, wp_version } = req.body;
@@ -33,7 +40,7 @@ router.post('/', requireAuth, async (req, res) => {
     ]).catch(() => {}); // Non-fatal if table doesn't exist yet
 
     // Email notification
-    await resend.emails.send({
+    await getResend()?.emails.send({
       from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
       to:      process.env.LB_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'hello@learn-bridge.com',
       subject: `🎫 LB Support Ticket: ${subject} [${req.user.tier}]`,
@@ -62,7 +69,7 @@ router.post('/', requireAuth, async (req, res) => {
     });
 
     // Confirmation email to customer
-    await resend.emails.send({
+    await getResend()?.emails.send({
       from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
       to:      req.user.email,
       subject: `We got your message — ${subject}`,

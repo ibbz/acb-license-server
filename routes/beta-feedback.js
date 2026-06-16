@@ -8,7 +8,14 @@ const { Resend } = require('resend');
 const { Pool }   = require('pg');
 
 const pool   = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy, guarded Resend client — keeps the server booting even if
+// RESEND_API_KEY is unset; email simply no-ops until the key is configured.
+let _resend = null;
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 router.post('/', async (req, res) => {
   const { tester_name, access_code, plan_tier, submitted_at, tasks, overall_rating, overall_comments } = req.body;
@@ -56,7 +63,7 @@ router.post('/', async (req, res) => {
       ? (tasks.reduce((s, t) => s + (t.rating || 0), 0) / tasks.filter(t => t.rating).length).toFixed(1)
       : 'N/A';
 
-    await resend.emails.send({
+    await getResend()?.emails.send({
       from:    isLB ? (process.env.LB_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>') : (process.env.RESEND_FROM_EMAIL || 'AI Content Bridge <noreply@aicontentbridge.com>'),
       to:      isLB ? (process.env.LB_BETA_FEEDBACK_EMAIL || process.env.LB_SUPPORT_EMAIL || 'hello@learn-bridge.com') : (process.env.BETA_FEEDBACK_EMAIL || process.env.ADMIN_EMAIL || 'hello@aicontentbridge.com'),
       subject: `${isLB ? '🎓 LB ' : ''}🧪 Beta Feedback — ${tester_name} (${completedCount}/${tasks.length} tasks, ${avgRating}★)`,

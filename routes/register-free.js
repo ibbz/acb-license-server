@@ -19,7 +19,14 @@ const pool   = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy, guarded Resend client — keeps the server booting even if
+// RESEND_API_KEY is unset; email simply no-ops until the key is configured.
+let _resend = null;
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -197,7 +204,7 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
 
   const verifyUrl = `${process.env.SERVER_URL}/verify-email?token=${token}`;
 
-  await resend.emails.send({
+  await getResend()?.emails.send({
     from:    process.env.RESEND_FROM_EMAIL,
     to:      email,
     subject: 'Verify your email — AI Content Bridge',
