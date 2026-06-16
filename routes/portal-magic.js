@@ -50,7 +50,7 @@ router.post('/magic-request', async (req, res) => {
       LIMIT 1
     `, [user.id]);
     if (recentRes.rows.length > 0) {
-      console.log(`[lb-portal/magic] Cooldown active for ${email} — skipping`);
+      console.log(`[portal/magic] Cooldown active for ${email} — skipping`);
       return;
     }
 
@@ -62,18 +62,20 @@ router.post('/magic-request', async (req, res) => {
       VALUES ($1, $2, $3)
     `, [user.id, token, exp]);
 
-    const baseUrl = process.env.LB_PORTAL_URL || 'https://app.learn-bridge.com';
-    const link    = `${baseUrl}/lb-portal?magic=${token}`;
+    // Magic link points at the ACB customer portal (portal.html), matching the
+    // ${PORTAL_URL}/portal convention used by portal-stripe.js. portal.html reads ?magic=.
+    const baseUrl = process.env.PORTAL_URL || 'https://aicontentbridge.com';
+    const link    = `${baseUrl}/portal?magic=${token}`;
 
     await getResend()?.emails.send({
-      from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
+      from:    process.env.RESEND_FROM_EMAIL || 'AI Content Bridge <noreply@aicontentbridge.com>',
       to:      email,
-      subject: 'Your sign-in link — LearnBridge',
+      subject: 'Your sign-in link — AI Content Bridge',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px 20px;background:#f8fafc;">
-          <div style="background:#3C3489;border-radius:12px;padding:24px 28px;margin-bottom:20px;text-align:center;">
-            <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#EEEDFE;">LearnBridge</p>
-            <h2 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">Sign in to LearnBridge</h2>
+          <div style="background:#06101E;border-radius:12px;padding:24px 28px;margin-bottom:20px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#5CA5FF;">AI Content Bridge</p>
+            <h2 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">Sign in to your account</h2>
           </div>
           <div style="background:#fff;border-radius:10px;padding:28px 24px;">
             <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.6;">
@@ -82,8 +84,8 @@ router.post('/magic-request', async (req, res) => {
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
               <tr><td align="center">
                 <table cellpadding="0" cellspacing="0" border="0">
-                  <tr><td align="center" style="background:#7F77DD;border-radius:8px;">
-                    <a href="${link}" style="display:inline-block;padding:13px 32px;background:#7F77DD;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-size:15px;font-family:Arial,sans-serif;">
+                  <tr><td align="center" style="background:#10acf5;border-radius:8px;">
+                    <a href="${link}" style="display:inline-block;padding:13px 32px;background:#10acf5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-size:15px;font-family:Arial,sans-serif;">
                       Sign in to portal &#8594;
                     </a>
                   </td></tr>
@@ -91,7 +93,7 @@ router.post('/magic-request', async (req, res) => {
               </td></tr>
             </table>
             <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Link not working? Copy and paste into your browser:</p>
-            <p style="margin:0;font-size:12px;word-break:break-all;"><a href="${link}" style="color:#7F77DD;">${link}</a></p>
+            <p style="margin:0;font-size:12px;word-break:break-all;"><a href="${link}" style="color:#10acf5;">${link}</a></p>
           </div>
           <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
             If you didn't request this, you can safely ignore it.
@@ -100,7 +102,7 @@ router.post('/magic-request', async (req, res) => {
       `,
     });
 
-    console.log(`[lb-portal/magic] Sent magic link to ${email}`);
+    console.log(`[portal/magic] Sent magic link to ${email}`);
 
   } catch (err) {
     console.error('[portal/magic-request]', err.message);

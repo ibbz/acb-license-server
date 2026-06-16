@@ -41,19 +41,19 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Email notification
     await getResend()?.emails.send({
-      from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
-      to:      process.env.LB_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'hello@learn-bridge.com',
-      subject: `🎫 LB Support Ticket: ${subject} [${req.user.tier}]`,
+      from:    process.env.RESEND_FROM_EMAIL || 'AI Content Bridge <noreply@aicontentbridge.com>',
+      to:      process.env.SUPPORT_EMAIL || process.env.ADMIN_EMAIL || 'support@aicontentbridge.com',
+      subject: `🎫 Support Ticket: ${subject} [${req.user.tier}]`,
       html: `
         <div style="font-family:'DM Sans',Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9fafb;padding:32px 24px">
-          <div style="background:#534AB7;border-radius:12px;padding:24px 28px;margin-bottom:20px">
-            <h2 style="margin:0;color:#EEEDFE;font-size:18px;font-weight:400;font-style:italic">Support Ticket</h2>
-            <p style="margin:4px 0 0;color:rgba(200,214,240,0.5);font-size:13px">LearnBridge</p>
+          <div style="background:#06101E;border-radius:12px;padding:24px 28px;margin-bottom:20px">
+            <h2 style="margin:0;color:#5CA5FF;font-size:18px;font-weight:400;font-style:italic">Support Ticket</h2>
+            <p style="margin:4px 0 0;color:rgba(200,214,240,0.5);font-size:13px">AI Content Bridge</p>
           </div>
           <div style="background:#fff;border-radius:10px;padding:20px 24px;margin-bottom:14px;border:1px solid #e5e7eb">
             <table style="width:100%;border-collapse:collapse">
               <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;width:120px">From</td><td style="font-weight:600;color:#111">${req.user.name} &lt;${req.user.email}&gt;</td></tr>
-              <tr><td style="padding:5px 0;color:#6b7280;font-size:13px">Plan</td><td style="color:#7F77DD;font-weight:600">${req.user.tier}</td></tr>
+              <tr><td style="padding:5px 0;color:#6b7280;font-size:13px">Plan</td><td style="color:#10acf5;font-weight:600">${req.user.tier}</td></tr>
               <tr><td style="padding:5px 0;color:#6b7280;font-size:13px">Domain</td><td style="color:#374151;font-family:monospace;font-size:12px">${req.user.domain || '—'}</td></tr>
               <tr><td style="padding:5px 0;color:#6b7280;font-size:13px">WP Version</td><td style="color:#374151">${wp_version || '—'}</td></tr>
               <tr><td style="padding:5px 0;color:#6b7280;font-size:13px">Category</td><td style="color:#374151">${category}</td></tr>
@@ -70,35 +70,35 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Confirmation email to customer
     await getResend()?.emails.send({
-      from:    process.env.LB_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'LearnBridge <noreply@learn-bridge.com>',
+      from:    process.env.RESEND_FROM_EMAIL || 'AI Content Bridge <noreply@aicontentbridge.com>',
       to:      req.user.email,
       subject: `We got your message — ${subject}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:32px 20px;background:#f8fafc;">
-          <div style="background:#534AB7;border-radius:12px;padding:24px 28px;margin-bottom:20px;text-align:center;">
-            <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#EEEDFE;">LearnBridge</p>
+          <div style="background:#06101E;border-radius:12px;padding:24px 28px;margin-bottom:20px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#5CA5FF;">AI Content Bridge</p>
             <h2 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">Support ticket received</h2>
           </div>
           <div style="background:#fff;border-radius:10px;padding:24px;">
             <p style="margin:0 0 12px;font-size:15px;color:#374151;">Hi ${req.user.email.split('@')[0]},</p>
             <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.6;">We've received your support request about <strong>${subject}</strong>.</p>
             <p style="margin:0 0 16px;font-size:14px;color:#374151;">We typically respond within one business day. Pro and Agency customers get priority.</p>
-            <div style="background:#EEEDFE;border:1px solid #AFA9EC;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-              <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7F77DD;">Your ticket reference</p>
-              <p style="margin:0;font-family:'Courier New',monospace;font-size:13px;color:#3C3489;">${req.user.license_key}-${Date.now()}</p>
+            <div style="background:#EAF6FE;border:1px solid #B5E2FA;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+              <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#10acf5;">Your ticket reference</p>
+              <p style="margin:0;font-family:'Courier New',monospace;font-size:13px;color:#06101E;">${req.user.license_key}-${Date.now()}</p>
             </div>
-            <p style="margin:0;font-size:13px;color:#6b7280;">LearnBridge Support &bull; <a href="mailto:hello@learn-bridge.com" style="color:#7F77DD;">hello@learn-bridge.com</a></p>
+            <p style="margin:0;font-size:13px;color:#6b7280;">AI Content Bridge Support &bull; <a href="mailto:support@aicontentbridge.com" style="color:#10acf5;">support@aicontentbridge.com</a></p>
           </div>
         </div>
       `,
     });
 
-    console.log(`[lb-portal/support] Ticket from ${req.user.email}: ${subject}`);
+    console.log(`[portal/support] Ticket from ${req.user.email}: ${subject}`);
     res.json({ success: true });
 
   } catch (err) {
-    console.error('[lb-portal/support]', err.message);
-    res.status(500).json({ error: 'Failed to submit ticket. Please email hello@learn-bridge.com directly.' });
+    console.error('[portal/support]', err.message);
+    res.status(500).json({ error: 'Failed to submit ticket. Please email support@aicontentbridge.com directly.' });
   }
 });
 
