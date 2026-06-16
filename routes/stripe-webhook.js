@@ -37,6 +37,19 @@ router.post('/', async (req, res) => {
 
   console.log(`[webhook] Event received: ${event.type}`);
 
+  // ── Product isolation ──────────────────────────────────────────────────────
+  // This Stripe account also serves LearnBridge, and Stripe delivers every event
+  // to every subscribed endpoint. Only act on events whose customer exists in THIS
+  // (ACB) database; anything else belongs to the other product — acknowledge and skip.
+  const eventObj = event.data.object || {};
+  const customerId = typeof eventObj.customer === 'string'
+    ? eventObj.customer
+    : (eventObj.customer && eventObj.customer.id) || null;
+  if (customerId && !(await isAcbCustomer(customerId))) {
+    console.log(`[webhook] Ignored ${event.type} — ${customerId} is not an ACB customer`);
+    return res.json({ received: true, ignored: true });
+  }
+
   try {
     switch (event.type) {
       // ── One-time credit bundle purchase completed ──
@@ -73,6 +86,15 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
+
+// Returns true if the Stripe customer belongs to this (ACB) database.
+async function isAcbCustomer(customerId) {
+  const r = await pool.query(
+    'SELECT 1 FROM license_keys WHERE stripe_customer_id = $1 LIMIT 1',
+    [customerId]
+  );
+  return r.rows.length > 0;
+}
 
 async function handleCheckoutCompleted(session) {
   // Only process one-time payments (not subscription checkouts)

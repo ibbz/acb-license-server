@@ -78,7 +78,7 @@ router.post('/', async (req, res) => {
         if (!stripeCustomerId) {
             const customer = await stripe.customers.create({
                 email:    userEmail,
-                metadata: { license_key, license_id: licenseId.toString() },
+                metadata: { app: 'acb', license_key, license_id: licenseId.toString() },
             });
             stripeCustomerId = customer.id;
 
@@ -122,6 +122,7 @@ router.post('/', async (req, res) => {
                 quantity: 1,
             }],
             metadata: {
+                app:         'acb',
                 license_key,
                 license_id:  licenseId.toString(),
                 bundle_id,
