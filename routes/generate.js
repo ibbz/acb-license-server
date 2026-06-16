@@ -360,7 +360,7 @@ async function uploadImageToWordPress(domain, imageBase64, title, postId, genera
     }
 }
 
-async function postToWordPress(domain, publishPayload, attempt = 1) {
+async function postToWordPress(domain, publishPayload, generateSecret, attempt = 1) {
     const url = `https://${domain}/wp-json/ai-content/v1/publish`;
 
     console.log(`[generate] Posting to WordPress: ${url} (attempt ${attempt})`);
@@ -370,7 +370,10 @@ async function postToWordPress(domain, publishPayload, attempt = 1) {
     try {
         const res = await fetch(url, {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-generate-secret': generateSecret || '',
+            },
             body:    JSON.stringify(publishPayload),
         });
 
@@ -389,7 +392,7 @@ async function postToWordPress(domain, publishPayload, attempt = 1) {
         if (attempt < 2) {
             console.warn(`[generate] WordPress /publish attempt ${attempt} failed — retrying in 3s: ${err.message}`);
             await new Promise(r => setTimeout(r, 3000));
-            return postToWordPress(domain, publishPayload, attempt + 1);
+            return postToWordPress(domain, publishPayload, generateSecret, attempt + 1);
         }
         throw err;
     }
@@ -623,7 +626,7 @@ router.post('/', async (req, res) => {
             tec_organiser:      tec_organiser    || '',
         };
 
-        await postToWordPress(domain, publishPayload);
+        await postToWordPress(domain, publishPayload, process.env.GENERATE_SECRET || '');
         console.log(`[generate] COMPLETE — "${title}" in ${publishPayload.execution_time}s`);
 
     } catch (err) {
@@ -643,7 +646,7 @@ router.post('/', async (req, res) => {
                 status:     'failed',
                 error:      err.message,
                 post_type:  post_type || 'post',
-            });
+            }, process.env.GENERATE_SECRET || '');
         } catch (notifyErr) {
             console.error('[generate] Failed to notify WordPress of error:', notifyErr.message);
         }
