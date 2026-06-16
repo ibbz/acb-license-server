@@ -1,0 +1,842 @@
+/**
+ * GET /api/admin/dashboard
+ * GET /api/admin/users
+ * GET /api/admin/analytics
+ *
+ * Protected admin endpoints for the marketing site dashboard.
+ * Secured by x-admin-secret header.
+ */
+
+const express  = require('express');
+const router   = express.Router();
+const { Pool } = require('pg');
+const Stripe   = require('stripe');
+
+const pool   = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+
+// ── Auth middleware ───────────────────────────────────────────────────────────
+const auth = (req, res, next) => {
+    if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
+        return res.status(401).json({ success: false, error: 'Unauthorised.' });
+    }
+    next();
+};
+
+// ── CORS for dashboard hosted on marketing site ───────────────────────────────
+router.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+});
+
+// ── GET /api/admin/dashboard ──────────────────────────────────────────────────
+// Headline metrics — the numbers you check every morning
+router.get('/dashboard', auth, async (req, res) => {
+    try {
+        // User counts by tier
+        const userCounts = await pool.query(`
+            SELECT
+                lk.tier,
+                lk.status,
+                COUNT(*) as count
+            FROM license_keys lk
+            GROUP BY lk.tier, lk.status
+        `);
+
+        // New signups this week / month
+        const signupTrend = await pool.query(`
+            SELECT
+                COUNT(*) FILTER (WHERE lk.created_at >= NOW() - INTERVAL '24 hours')  AS today,
+                COUNT(*) FILTER (WHERE lk.created_at >= NOW() - INTERVAL '7 days')    AS this_week,
+                COUNT(*) FILTER (WHERE lk.created_at >= NOW() - INTERVAL '30 days')   AS this_month,
+                COUNT(*) FILTER (WHERE lk.created_at >= NOW() - INTERVAL '30 days'
+                    AND lk.tier != 'free') AS paid_this_month
+            FROM license_keys lk
+        `);
+
+        // Credits stats
+        const creditStats = await pool.query(`
+            SELECT
+                COALESCE(SUM(credits_issued), 0)    AS total_issued,
+                COALESCE(SUM(credits_remaining), 0) AS total_remaining,
+                COALESCE(SUM(credits_issued - credits_remaining), 0) AS total_consumed
+            FROM credit_batches
+            WHERE expiry_date > CURRENT_DATE
+        `);
+
+        // Usage this month
+        const usageStats = await pool.query(`
+            SELECT
+                COUNT(*)                                   AS generations_total,
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW())) AS generations_this_month,
+                COALESCE(SUM(credits_used), 0)             AS credits_used_total,
+                COALESCE(SUM(credits_used) FILTER (WHERE created_at >= date_trunc('month', NOW())), 0) AS credits_used_this_month,
+                COALESCE(AVG(credits_used), 0)             AS avg_credits_per_gen,
+                COUNT(DISTINCT domain)                     AS unique_domains
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+        `);
+
+        // Daily signups last 30 days for sparkline
+        const dailySignups = await pool.query(`
+            SELECT
+                DATE(created_at) AS day,
+                COUNT(*)         AS count,
+                COUNT(*) FILTER (WHERE tier != 'free') AS paid_count
+            FROM license_keys
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY day
+        `);
+
+        // Daily generations last 30 days
+        const dailyGenerations = await pool.query(`
+            SELECT
+                DATE(created_at) AS day,
+                COUNT(*)         AS count,
+                COALESCE(SUM(credits_used), 0) AS credits
+            FROM usage_logs
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+              AND post_title != 'VALIDATION_CHECK'
+            GROUP BY DATE(created_at)
+            ORDER BY day
+        `);
+
+        // Free → paid conversion
+        const conversionRate = await pool.query(`
+            SELECT
+                COUNT(*) FILTER (WHERE tier = 'free')  AS free_users,
+                COUNT(*) FILTER (WHERE tier != 'free') AS paid_users
+            FROM license_keys
+            WHERE status = 'active'
+        `);
+
+        // Email verification rate for free tier
+        const verificationRate = await pool.query(`
+            SELECT
+                COUNT(*) AS total_free,
+                COUNT(*) FILTER (WHERE email_verified = true) AS verified
+            FROM license_keys
+            WHERE tier = 'free'
+        `);
+
+        // Estimated costs (Anthropic ~$0.003/credit, OpenAI image ~$0.02/gen)
+        const totalConsumed = parseFloat(creditStats.rows[0].total_consumed) || 0;
+        const totalGenerations = parseInt(usageStats.rows[0].generations_total) || 0;
+        const estimatedCost = (totalConsumed * 0.003) + (totalGenerations * 0.02);
+        const thisMonthConsumed = parseFloat(usageStats.rows[0].credits_used_this_month) || 0;
+        const thisMonthGens = parseInt(usageStats.rows[0].generations_this_month) || 0;
+        const estimatedCostThisMonth = (thisMonthConsumed * 0.003) + (thisMonthGens * 0.02);
+
+        // MRR estimate from DB (Stripe gives exact figure)
+        const TIER_PRICES = { starter: 19, pro: 49, agency: 149 };
+        const mrrEstimate = userCounts.rows
+            .filter(r => r.status === 'active' && TIER_PRICES[r.tier])
+            .reduce((sum, r) => sum + (TIER_PRICES[r.tier] * parseInt(r.count)), 0);
+
+        // Get MRR from Stripe if available
+        let stripeMrr = null;
+        if (stripe) {
+            try {
+                const subs = await stripe.subscriptions.list({ status: 'active', limit: 100 });
+                stripeMrr = subs.data.reduce((sum, sub) => {
+                    const monthly = sub.items.data.reduce((s, item) => {
+                        const price = item.price;
+                        const amount = price.unit_amount / 100;
+                        return s + (price.recurring?.interval === 'year' ? amount / 12 : amount);
+                    }, 0);
+                    return sum + monthly;
+                }, 0);
+            } catch(e) {
+                console.error('[admin/dashboard] Stripe MRR error:', e.message);
+            }
+        }
+
+        return res.json({
+            success: true,
+            users: {
+                by_tier: userCounts.rows,
+                signups:  signupTrend.rows[0],
+                conversion: conversionRate.rows[0],
+                verification: verificationRate.rows[0],
+            },
+            credits: creditStats.rows[0],
+            usage: usageStats.rows[0],
+            revenue: {
+                mrr_estimate:    mrrEstimate,
+                mrr_stripe:      stripeMrr,
+                arr_estimate:    mrrEstimate * 12,
+                cost_total:      Math.round(estimatedCost * 100) / 100,
+                cost_this_month: Math.round(estimatedCostThisMonth * 100) / 100,
+                margin_pct:      mrrEstimate > 0 ? Math.round(((mrrEstimate - estimatedCostThisMonth) / mrrEstimate) * 100) : null,
+            },
+            charts: {
+                daily_signups:     dailySignups.rows,
+                daily_generations: dailyGenerations.rows,
+            },
+        });
+
+    } catch (err) {
+        console.error('[admin/dashboard]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── GET /api/admin/users ──────────────────────────────────────────────────────
+// Full user list with activity data
+router.get('/users', auth, async (req, res) => {
+    const limit  = Math.min(parseInt(req.query.limit  || 50), 200);
+    const offset = parseInt(req.query.offset || 0);
+    const tier   = req.query.tier || null;
+    const search = req.query.search || null;
+    const sort   = req.query.sort || 'created_at';
+    const order  = req.query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const allowed_sorts = ['created_at', 'last_active', 'credits_used', 'tier'];
+    const safe_sort = allowed_sorts.includes(sort) ? sort : 'created_at';
+
+    try {
+        const conditions = ["lk.status != 'cancelled'"];
+        const params = [];
+        let pi = 1;
+
+        if (tier) { conditions.push(`lk.tier = $${pi++}`); params.push(tier); }
+        if (search) { conditions.push(`(u.email ILIKE $${pi++} OR u.name ILIKE $${pi++} OR fr.registered_domain ILIKE $${pi++})`); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+
+        const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+        const users = await pool.query(`
+            SELECT
+                u.id,
+                u.email,
+                u.name,
+                u.created_at               AS signup_date,
+                lk.tier,
+                lk.status,
+                lk.license_key,
+                lk.email_verified,
+                lk.registered_domain,
+                lk.created_at              AS license_created,
+                COALESCE(SUM(cb.credits_issued), 0) AS credits_issued,
+                COALESCE(SUM(cb.credits_remaining), 0) AS credits_remaining,
+                COALESCE(SUM(cb.credits_issued - cb.credits_remaining), 0) AS credits_used,
+                COUNT(ul.id)               AS total_generations,
+                MAX(ul.created_at)         AS last_active,
+                fr.registered_ip
+            FROM users u
+            JOIN license_keys lk ON lk.user_id = u.id
+            LEFT JOIN credit_batches cb ON cb.license_key_id = lk.id
+            LEFT JOIN usage_logs ul ON ul.license_key_id = lk.id AND ul.post_title != 'VALIDATION_CHECK'
+            LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+            ${where}
+            GROUP BY u.id, u.email, u.name, u.created_at, lk.id, lk.tier,
+                     lk.status, lk.license_key, lk.email_verified,
+                     lk.registered_domain, lk.created_at, fr.registered_ip
+            ORDER BY ${safe_sort === 'created_at' ? 'lk.created_at' :
+                       safe_sort === 'last_active' ? 'MAX(ul.created_at)' :
+                       safe_sort === 'credits_used' ? 'credits_used' : 'lk.tier'} ${order}
+            LIMIT $${pi++} OFFSET $${pi++}
+        `, [...params, limit, offset]);
+
+        const total = await pool.query(`
+            SELECT COUNT(DISTINCT u.id) AS count
+            FROM users u
+            JOIN license_keys lk ON lk.user_id = u.id
+            LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+            ${where}
+        `, params);
+
+        return res.json({
+            success: true,
+            users:   users.rows,
+            total:   parseInt(total.rows[0].count),
+            limit,
+            offset,
+        });
+
+    } catch (err) {
+        console.error('[admin/users]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── GET /api/admin/analytics ──────────────────────────────────────────────────
+// Deep analytics — content types, features, top users
+router.get('/analytics', auth, async (req, res) => {
+    try {
+        // Content type popularity
+        const contentTypes = await pool.query(`
+            SELECT
+                COALESCE(content_type, 'blog_post') AS content_type,
+                COUNT(*)                            AS total,
+                COUNT(DISTINCT domain)              AS unique_domains,
+                COALESCE(SUM(credits_used), 0)      AS credits_consumed,
+                ROUND(AVG(credits_used)::numeric, 1) AS avg_credits
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+              AND created_at >= NOW() - INTERVAL '90 days'
+            GROUP BY COALESCE(content_type, 'blog_post')
+            ORDER BY total DESC
+        `);
+
+        // Style profile usage
+        const styleProfiles = await pool.query(`
+            SELECT
+                style_profile_used,
+                COUNT(*) AS uses
+            FROM usage_logs
+            WHERE style_profile_used IS NOT NULL
+              AND post_title != 'VALIDATION_CHECK'
+            GROUP BY style_profile_used
+            ORDER BY uses DESC
+            LIMIT 20
+        `);
+
+        // Top users by activity
+        const topUsers = await pool.query(`
+            SELECT
+                u.email,
+                u.name,
+                lk.tier,
+                lk.registered_domain,
+                COUNT(ul.id)                    AS total_generations,
+                COALESCE(SUM(ul.credits_used),0) AS credits_used,
+                MAX(ul.created_at)               AS last_active,
+                COUNT(DISTINCT ul.content_type)  AS content_types_used
+            FROM users u
+            JOIN license_keys lk ON lk.user_id = u.id
+            JOIN usage_logs ul ON ul.license_key_id = lk.id
+            WHERE ul.post_title != 'VALIDATION_CHECK'
+            GROUP BY u.id, u.email, u.name, lk.tier, lk.registered_domain
+            ORDER BY total_generations DESC
+            LIMIT 20
+        `);
+
+        // Top domains
+        const topDomains = await pool.query(`
+            SELECT
+                domain,
+                COUNT(*)                    AS total_generations,
+                COALESCE(SUM(credits_used),0) AS credits_used,
+                COUNT(DISTINCT content_type) AS content_types_used,
+                MAX(created_at)              AS last_active
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+            GROUP BY domain
+            ORDER BY total_generations DESC
+            LIMIT 20
+        `);
+
+        // Feature usage rates
+        const featureUsage = await pool.query(`
+            SELECT
+                COUNT(*) AS total_gens,
+                COUNT(*) FILTER (WHERE has_youtube = true)        AS with_youtube,
+                COUNT(*) FILTER (WHERE style_profile_used IS NOT NULL) AS with_style_profile,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE has_youtube = true) / NULLIF(COUNT(*),0), 1) AS youtube_pct,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE style_profile_used IS NOT NULL) / NULLIF(COUNT(*),0), 1) AS style_profile_pct
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+              AND created_at >= NOW() - INTERVAL '30 days'
+        `);
+
+        // Generation volume by hour of day (reveals peak usage times)
+        const peakHours = await pool.query(`
+            SELECT
+                EXTRACT(HOUR FROM created_at) AS hour,
+                COUNT(*)                      AS count
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+              AND created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY EXTRACT(HOUR FROM created_at)
+            ORDER BY hour
+        `);
+
+        // Week-on-week growth
+        const weeklyGrowth = await pool.query(`
+            SELECT
+                DATE_TRUNC('week', created_at) AS week,
+                COUNT(*)                       AS new_users,
+                COUNT(*) FILTER (WHERE tier != 'free') AS paid_users
+            FROM license_keys
+            WHERE created_at >= NOW() - INTERVAL '12 weeks'
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week
+        `);
+
+        // Content type usage by tier
+        const typesByTier = await pool.query(`
+            SELECT
+                lk.tier,
+                COALESCE(ul.content_type, 'blog_post') AS content_type,
+                COUNT(*) AS count
+            FROM usage_logs ul
+            JOIN license_keys lk ON ul.license_key_id = lk.id
+            WHERE ul.post_title != 'VALIDATION_CHECK'
+              AND ul.created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY lk.tier, COALESCE(ul.content_type, 'blog_post')
+            ORDER BY lk.tier, count DESC
+        `);
+
+        return res.json({
+            success: true,
+            content_types:  contentTypes.rows,
+            style_profiles: styleProfiles.rows,
+            top_users:      topUsers.rows,
+            top_domains:    topDomains.rows,
+            feature_usage:  featureUsage.rows[0],
+            peak_hours:     peakHours.rows,
+            weekly_growth:  weeklyGrowth.rows,
+            types_by_tier:  typesByTier.rows,
+        });
+
+    } catch (err) {
+        console.error('[admin/analytics]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── POST /api/admin/add-credits ───────────────────────────────────────────────
+// Manually add credits to a user (for support, compensation etc.)
+router.post('/add-credits', auth, async (req, res) => {
+    const { license_key, credits, reason } = req.body;
+    if (!license_key || !credits) return res.status(400).json({ success: false, error: 'license_key and credits required.' });
+    try {
+        const lk = await pool.query(`SELECT id FROM license_keys WHERE license_key = $1`, [license_key]);
+        if (!lk.rows.length) return res.status(404).json({ success: false, error: 'License not found.' });
+        await pool.query(`
+            INSERT INTO credit_batches (license_key_id, credits_issued, credits_remaining, issued_date, expiry_date, notes)
+            VALUES ($1, $2, $2, NOW(), NOW() + INTERVAL '1 year', $3)
+        `, [lk.rows[0].id, parseInt(credits), `admin_grant: ${reason || 'manual'}`]);
+        console.log(`[admin] Added ${credits} credits to ${license_key}. Reason: ${reason}`);
+        return res.json({ success: true, message: `${credits} credits added to ${license_key}.` });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── POST /api/admin/create-beta-license ──────────────────────────────────────
+// Creates a beta tester license with configurable tier and credits.
+// Also creates the user record if the email doesn't exist yet.
+router.post('/create-beta-license', auth, async (req, res) => {
+    const { email, name, tier, credits, beta_code, notes } = req.body;
+
+    if (!email) return res.status(400).json({ success: false, error: 'Email is required.' });
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const planTier        = ['free','starter','pro','agency'].includes(tier) ? tier : 'pro';
+    const creditCount     = parseInt(credits) || { free: 5, starter: 30, pro: 100, agency: 300 }[planTier];
+    const crypto          = require('crypto');
+
+    // Generate license key — format: ACB-BETA-XXXX-XXXX-XXXX
+    const seg = () => crypto.randomBytes(2).toString('hex').toUpperCase();
+    const licenseKey = `ACB-BETA-${seg()}-${seg()}-${seg()}`;
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Create or find user
+        const userResult = await client.query(`
+            INSERT INTO users (email, name, created_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id
+        `, [normalizedEmail, name?.trim() || normalizedEmail.split('@')[0]]);
+        const userId = userResult.rows[0].id;
+
+        // Check if user already has a beta license
+        const existing = await client.query(`
+            SELECT license_key FROM license_keys
+            WHERE user_id = $1 AND license_key LIKE 'ACB-BETA-%'
+            LIMIT 1
+        `, [userId]);
+
+        if (existing.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                success: false,
+                error: `This email already has a beta license: ${existing.rows[0].license_key}`,
+                existing_key: existing.rows[0].license_key,
+            });
+        }
+
+        // Create license key — pre-verified, no domain lock for beta testers
+        await client.query(`
+            INSERT INTO license_keys
+                (user_id, license_key, tier, status, posts_limit, monthly_credit_limit,
+                 month_reset_date, email_verified, email_verified_at)
+            VALUES ($1, $2, $3, 'active', $4, $4, NOW() + INTERVAL '3 months', TRUE, NOW())
+        `, [userId, licenseKey, planTier, creditCount]);
+
+        const lkResult = await client.query(`SELECT id FROM license_keys WHERE license_key = $1`, [licenseKey]);
+        const licenseKeyId = lkResult.rows[0].id;
+
+        // Grant credits — 3 month expiry for beta
+        await client.query(`
+            INSERT INTO credit_batches
+                (license_key_id, credits_issued, credits_remaining, issued_date, expiry_date, notes)
+            VALUES ($1, $2, $2, NOW(), NOW() + INTERVAL '3 months', $3)
+        `, [licenseKeyId, creditCount, `beta_license: ${notes || beta_code || 'admin created'}`]);
+
+        await client.query('COMMIT');
+
+        console.log(`[admin] Beta license created: ${licenseKey} | ${normalizedEmail} | ${planTier} | ${creditCount} credits`);
+
+        return res.json({
+            success:     true,
+            license_key: licenseKey,
+            email:       normalizedEmail,
+            tier:        planTier,
+            credits:     creditCount,
+            expires:     '3 months from today',
+            message:     `Beta license created successfully for ${normalizedEmail}`,
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[admin/create-beta-license]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// ── POST /api/admin/delete-user ───────────────────────────────────────────────
+// Soft-deletes a user: cancels their licence key, zeroes credit batches,
+// and marks free_registrations. Nothing is hard-deleted — recoverable from DB.
+// Body: { license_key } OR { email }
+router.post('/delete-user', auth, async (req, res) => {
+    const { license_key, email } = req.body;
+    if (!license_key && !email) {
+        return res.status(400).json({ success: false, error: 'Provide license_key or email' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Resolve the licence key record
+        let lkRes;
+        if (license_key) {
+            lkRes = await client.query(
+                `SELECT lk.id, lk.license_key, lk.tier, fr.email
+                 FROM license_keys lk
+                 LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+                 WHERE lk.license_key = $1 LIMIT 1`,
+                [license_key]
+            );
+        } else {
+            lkRes = await client.query(
+                `SELECT lk.id, lk.license_key, lk.tier, fr.email
+                 FROM license_keys lk
+                 JOIN free_registrations fr ON fr.license_key_id = lk.id
+                 WHERE LOWER(fr.email) = LOWER($1) LIMIT 1`,
+                [email]
+            );
+        }
+
+        if (lkRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+
+        const lk = lkRes.rows[0];
+
+        // 1. Cancel the licence key
+        await client.query(
+            `UPDATE license_keys SET status = 'cancelled', stripe_customer_id = NULL WHERE id = $1`,
+            [lk.id]
+        );
+
+        // 2. Zero all credit batches so they can't generate
+        await client.query(
+            `UPDATE credit_batches SET credits_remaining = 0 WHERE license_key_id = $1`,
+            [lk.id]
+        );
+
+        // 3. Log the admin action in usage_logs for audit trail
+        await client.query(
+            `INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, created_at)
+             VALUES ($1, 'admin_action', 'ACCOUNT_DELETED', 0, 'admin', NOW())`,
+            [lk.id]
+        );
+
+        await client.query('COMMIT');
+
+        console.log(`[admin/delete-user] Cancelled: ${lk.license_key} | ${lk.email} | tier: ${lk.tier}`);
+
+        return res.json({
+            success:     true,
+            message:     `User deleted successfully`,
+            license_key: lk.license_key,
+            email:       lk.email,
+            note:        'Soft delete — data retained in DB. Credits zeroed. Licence cancelled. User can no longer generate.',
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[admin/delete-user]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+
+// ── POST /api/admin/revoke-licence ────────────────────────────────────────────
+// Revokes a licence key without deleting the account.
+// Useful for abuse, non-payment, or issuing a replacement key.
+// Body: { license_key, reason }
+router.post('/revoke-licence', auth, async (req, res) => {
+    const { license_key, reason } = req.body;
+    if (!license_key) {
+        return res.status(400).json({ success: false, error: 'license_key is required' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const lkRes = await client.query(
+            `SELECT lk.id, lk.status, lk.tier, fr.email
+             FROM license_keys lk
+             LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+             WHERE lk.license_key = $1 LIMIT 1`,
+            [license_key]
+        );
+
+        if (lkRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Licence key not found' });
+        }
+
+        const lk = lkRes.rows[0];
+
+        if (lk.status === 'revoked') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ success: false, error: 'Licence is already revoked' });
+        }
+
+        // Set status to revoked (distinct from cancelled — revoked = admin action, cancelled = subscription ended)
+        await client.query(
+            `UPDATE license_keys SET status = 'revoked' WHERE id = $1`,
+            [lk.id]
+        );
+
+        // Zero credits
+        await client.query(
+            `UPDATE credit_batches SET credits_remaining = 0 WHERE license_key_id = $1`,
+            [lk.id]
+        );
+
+        // Audit log
+        await client.query(
+            `INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, created_at)
+             VALUES ($1, 'admin_action', $2, 0, 'admin', NOW())`,
+            [lk.id, `LICENCE_REVOKED: ${reason || 'no reason given'}`]
+        );
+
+        await client.query('COMMIT');
+
+        console.log(`[admin/revoke-licence] Revoked: ${license_key} | ${lk.email} | reason: ${reason || 'none'}`);
+
+        return res.json({
+            success:     true,
+            message:     `Licence revoked`,
+            license_key,
+            email:       lk.email,
+            reason:      reason || null,
+            note:        'Account record retained. To reinstate, update license_keys.status to "active" directly in the DB or use add-credits to re-enable.',
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[admin/revoke-licence]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+
+// ── GET /api/admin/beta-feedback ──────────────────────────────────────────────
+// Lists all beta tester submissions, newest first.
+// Optional query params: ?limit=20&offset=0&code=BETA2026
+router.get('/beta-feedback', auth, async (req, res) => {
+    const limit  = Math.min(parseInt(req.query.limit  || 50), 200);
+    const offset = parseInt(req.query.offset || 0);
+    const code   = req.query.code || null;
+
+    try {
+        // Check the table exists first — beta_feedback may not be in all envs
+        const tableCheck = await pool.query(`
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'beta_feedback'
+            ) AS exists
+        `);
+
+        if (!tableCheck.rows[0].exists) {
+            return res.json({
+                success:     true,
+                submissions: [],
+                total:       0,
+                note:        'beta_feedback table does not exist yet — no submissions received',
+            });
+        }
+
+        const conditions = [];
+        const params     = [];
+        let pi = 1;
+
+        if (code) {
+            conditions.push(`access_code = $${pi++}`);
+            params.push(code.toUpperCase());
+        }
+
+        const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+        const rows = await pool.query(`
+            SELECT
+                id,
+                tester_name,
+                access_code,
+                plan_tier,
+                submitted_at,
+                overall_rating,
+                overall_comments,
+                -- Count completed tasks from JSON
+                (SELECT COUNT(*)
+                 FROM jsonb_array_elements(CASE WHEN tasks_json IS NOT NULL THEN tasks_json::jsonb ELSE '[]'::jsonb END) t
+                 WHERE (t->>'completed')::boolean = true
+                ) AS tasks_completed,
+                -- Count total tasks
+                jsonb_array_length(CASE WHEN tasks_json IS NOT NULL THEN tasks_json::jsonb ELSE '[]'::jsonb END) AS tasks_total,
+                -- Average rating across rated tasks
+                (SELECT ROUND(AVG((t->>'rating')::numeric), 1)
+                 FROM jsonb_array_elements(CASE WHEN tasks_json IS NOT NULL THEN tasks_json::jsonb ELSE '[]'::jsonb END) t
+                 WHERE t->>'rating' IS NOT NULL AND t->>'rating' != 'null'
+                ) AS avg_rating,
+                tasks_json
+            FROM beta_feedback
+            ${where}
+            ORDER BY submitted_at DESC
+            LIMIT $${pi++} OFFSET $${pi++}
+        `, [...params, limit, offset]);
+
+        const total = await pool.query(
+            `SELECT COUNT(*) AS count FROM beta_feedback ${where}`,
+            params
+        );
+
+        // Parse tasks_json so the caller gets structured data
+        const submissions = rows.rows.map(r => ({
+            id:               r.id,
+            tester_name:      r.tester_name,
+            access_code:      r.access_code,
+            plan_tier:        r.plan_tier,
+            submitted_at:     r.submitted_at,
+            overall_rating:   r.overall_rating,
+            overall_comments: r.overall_comments,
+            tasks_completed:  parseInt(r.tasks_completed) || 0,
+            tasks_total:      parseInt(r.tasks_total) || 0,
+            avg_rating:       r.avg_rating ? parseFloat(r.avg_rating) : null,
+            tasks:            r.tasks_json ? (typeof r.tasks_json === 'string' ? JSON.parse(r.tasks_json) : r.tasks_json) : [],
+        }));
+
+        return res.json({
+            success:     true,
+            submissions,
+            total:       parseInt(total.rows[0].count),
+            limit,
+            offset,
+        });
+
+    } catch (err) {
+        console.error('[admin/beta-feedback]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+
+// ── POST /api/admin/reinstate-user ────────────────────────────────────────────
+// Reinstates a cancelled or revoked user — sets status back to active.
+// Body: { license_key, credits } (credits optional — defaults to 0, use add-credits separately)
+router.post('/reinstate-user', auth, async (req, res) => {
+    const { license_key, credits } = req.body;
+    if (!license_key) {
+        return res.status(400).json({ success: false, error: 'license_key is required' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const lkRes = await client.query(
+            `SELECT lk.id, lk.status, lk.tier, fr.email
+             FROM license_keys lk
+             LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+             WHERE lk.license_key = $1 LIMIT 1`,
+            [license_key]
+        );
+
+        if (lkRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Licence key not found' });
+        }
+
+        const lk = lkRes.rows[0];
+
+        await client.query(
+            `UPDATE license_keys SET status = 'active' WHERE id = $1`,
+            [lk.id]
+        );
+
+        // Optionally restore credits
+        if (credits && parseInt(credits) > 0) {
+            const creditCount = parseInt(credits);
+            const expiry = new Date();
+            expiry.setMonth(expiry.getMonth() + 1);
+            await client.query(
+                `INSERT INTO credit_batches (license_key_id, credits_issued, credits_remaining, issued_date, expiry_date, notes)
+                 VALUES ($1, $2, $2, NOW(), $3, 'admin_reinstate')`,
+                [lk.id, creditCount, expiry.toISOString()]
+            );
+        }
+
+        // Audit log
+        await client.query(
+            `INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, created_at)
+             VALUES ($1, 'admin_action', 'ACCOUNT_REINSTATED', 0, 'admin', NOW())`,
+            [lk.id]
+        );
+
+        await client.query('COMMIT');
+
+        console.log(`[admin/reinstate-user] Reinstated: ${license_key} | ${lk.email}`);
+
+        return res.json({
+            success:     true,
+            message:     `User reinstated`,
+            license_key,
+            email:       lk.email,
+            credits_added: credits ? parseInt(credits) : 0,
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[admin/reinstate-user]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+module.exports = router;
