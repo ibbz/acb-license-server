@@ -19,6 +19,62 @@ const pool = new Pool({
 // Import bundle definitions so we stay in sync
 const { BUNDLES } = require('./create-checkout-session');
 
+// Monthly credit allowance per paid tier (from v2.5 product spec).
+// Free tier credits are granted at registration, not here.
+const CREDIT_ALLOWANCE = { starter: 30, pro: 100, agency: 300 };
+
+// Grant a subscription's monthly credit allowance.
+// No rollover: any leftover from a previous month's subscription grant is zeroed
+// first. One-time bundle credits (notes 'stripe_session:%') and the free grant
+// ('free_tier_initial') are left untouched, so they persist/stack on top.
+// Idempotent per dedupeKey so Stripe webhook retries can't double-grant.
+async function grantSubscriptionCredits({ licenseId, tier, dedupeKey, expiresInDays = 35 }) {
+  const allowance = CREDIT_ALLOWANCE[(tier || '').toLowerCase()];
+  if (!allowance) {
+    console.log(`[webhook] No credit allowance for tier '${tier}' — skipping grant`);
+    return;
+  }
+  const note = `subscription_credits:${dedupeKey}`;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const dup = await client.query(
+      `SELECT id FROM credit_batches WHERE license_key_id = $1 AND notes = $2`,
+      [licenseId, note]
+    );
+    if (dup.rows.length > 0) {
+      await client.query('ROLLBACK');
+      console.log(`[webhook] Duplicate credit grant ignored: ${note}`);
+      return;
+    }
+
+    // No rollover — expire any prior monthly subscription credits for this licence.
+    await client.query(
+      `UPDATE credit_batches
+       SET credits_remaining = 0, updated_at = NOW()
+       WHERE license_key_id = $1 AND notes LIKE 'subscription_credits:%' AND credits_remaining > 0`,
+      [licenseId]
+    );
+
+    await client.query(
+      `INSERT INTO credit_batches
+         (license_key_id, credits_issued, credits_remaining, source, issued_date, expiry_date, notes)
+       VALUES ($1, $2, $2, 'subscription', CURRENT_DATE, CURRENT_DATE + ($3::int * INTERVAL '1 day'), $4)`,
+      [licenseId, allowance, expiresInDays, note]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[webhook] Granted ${allowance} '${tier}' credits to license_id=${licenseId} (${note})`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[webhook] grantSubscriptionCredits failed:', err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // Note: raw body parsing is handled in server.js before this route
 // so Stripe signature verification works correctly.
 
@@ -45,7 +101,11 @@ router.post('/', async (req, res) => {
   const customerId = typeof eventObj.customer === 'string'
     ? eventObj.customer
     : (eventObj.customer && eventObj.customer.id) || null;
-  if (customerId && !(await isAcbCustomer(customerId))) {
+  // An event belongs to ACB if it carries our app tag (set on every ACB checkout
+  // and subscription) OR its customer is already linked in this database. The tag
+  // is essential for a brand-new subscriber whose customer isn't linked yet.
+  const taggedAcb = (eventObj.metadata && eventObj.metadata.app === 'acb');
+  if (customerId && !taggedAcb && !(await isAcbCustomer(customerId))) {
     console.log(`[webhook] Ignored ${event.type} — ${customerId} is not an ACB customer`);
     return res.json({ received: true, ignored: true });
   }
@@ -97,7 +157,11 @@ async function isAcbCustomer(customerId) {
 }
 
 async function handleCheckoutCompleted(session) {
-  // Only process one-time payments (not subscription checkouts)
+  // Subscription checkouts: link the customer and set the tier (authoritative).
+  if (session.mode === 'subscription') {
+    return handleSubscriptionCheckout(session);
+  }
+  // Only process one-time payments below
   if (session.mode !== 'payment') return;
 
   const { license_key, license_id, bundle_id, credits } = session.metadata || {};
@@ -156,6 +220,56 @@ async function handleCheckoutCompleted(session) {
   }
 }
 
+// Provision a subscription from its checkout session. checkout.session.completed
+// always carries our metadata (license_id, plan), so this works even for a brand-new
+// customer whose stripe_customer_id was created by Stripe during checkout.
+async function handleSubscriptionCheckout(session) {
+  const { license_id, plan } = session.metadata || {};
+  const customerId = typeof session.customer === 'string'
+    ? session.customer
+    : (session.customer && session.customer.id) || null;
+  const subscriptionId = typeof session.subscription === 'string'
+    ? session.subscription
+    : (session.subscription && session.subscription.id) || null;
+
+  if (!license_id) {
+    console.error('[webhook] subscription checkout missing license_id:', session.id);
+    return;
+  }
+
+  const planKey    = (plan || '').toLowerCase();
+  const tier       = ['starter', 'pro', 'agency'].includes(planKey) ? planKey : 'free';
+  const postsLimit = tier === 'starter' ? 50 : (tier === 'pro' || tier === 'agency') ? -1 : 5;
+
+  await pool.query(`
+    UPDATE license_keys
+    SET tier = $1,
+        status = 'active',
+        posts_limit = $2,
+        stripe_customer_id = COALESCE($3, stripe_customer_id),
+        stripe_subscription_id = $4,
+        stripe_subscription_status = 'active',
+        updated_at = NOW()
+    WHERE id = $5
+  `, [tier, postsLimit, customerId, subscriptionId, parseInt(license_id)]);
+
+  if (customerId) {
+    await pool.query(
+      `UPDATE users SET stripe_customer_id = $1 WHERE id = (SELECT user_id FROM license_keys WHERE id = $2)`,
+      [customerId, parseInt(license_id)]
+    );
+  }
+
+  // First month's credit allowance. Renewals are granted in handlePaymentSucceeded.
+  await grantSubscriptionCredits({
+    licenseId: parseInt(license_id),
+    tier,
+    dedupeKey: `checkout:${session.id}`,
+  });
+
+  console.log(`[webhook] Subscription provisioned: license_id=${license_id} → ${tier} (customer ${customerId})`);
+}
+
 async function handleSubscriptionUpdate(subscription) {
   const customerId = subscription.customer;
   const status = subscription.status;
@@ -172,7 +286,7 @@ async function handleSubscriptionUpdate(subscription) {
   const postsLimit = tier === 'starter' ? 50 : tier === 'pro' || tier === 'agency' ? -1 : 5;
 
   // Update license in database
-  await pool.query(`
+  const result = await pool.query(`
     UPDATE license_keys 
     SET 
       tier = $1,
@@ -183,6 +297,25 @@ async function handleSubscriptionUpdate(subscription) {
       updated_at = NOW()
     WHERE stripe_customer_id = $6
   `, [tier, status, postsLimit, subscription.id, status, customerId]);
+
+  // If the customer wasn't linked yet (e.g. this event arrived before the checkout
+  // session was processed), fall back to linking via our subscription metadata.
+  if (result.rowCount === 0 && subscription.metadata && subscription.metadata.license_id) {
+    const licenseId = parseInt(subscription.metadata.license_id);
+    await pool.query(`
+      UPDATE license_keys
+      SET tier = $1, status = $2, posts_limit = $3,
+          stripe_customer_id = $4, stripe_subscription_id = $5,
+          stripe_subscription_status = $6, updated_at = NOW()
+      WHERE id = $7
+    `, [tier, status, postsLimit, customerId, subscription.id, status, licenseId]);
+    await pool.query(
+      `UPDATE users SET stripe_customer_id = $1 WHERE id = (SELECT user_id FROM license_keys WHERE id = $2)`,
+      [customerId, licenseId]
+    );
+    console.log(`[webhook] Subscription linked via metadata.license_id=${licenseId} → ${tier} (${status})`);
+    return;
+  }
 
   console.log(`✅ Subscription updated: ${customerId} → ${tier} (${status})`);
 }
@@ -217,7 +350,26 @@ async function handlePaymentSucceeded(invoice) {
     WHERE stripe_customer_id = $1
   `, [customerId]);
 
-  console.log(`💰 Payment succeeded: ${customerId} → credits reset`);
+  // Top up the monthly credit allowance on renewals only. The first month is
+  // granted at checkout (handleSubscriptionCheckout); the first invoice has
+  // billing_reason 'subscription_create', so we skip it here to avoid double-granting.
+  if (invoice.billing_reason === 'subscription_cycle') {
+    const licRes = await pool.query(
+      `SELECT id, tier FROM license_keys WHERE stripe_customer_id = $1`,
+      [customerId]
+    );
+    if (licRes.rows.length > 0) {
+      await grantSubscriptionCredits({
+        licenseId: licRes.rows[0].id,
+        tier:      licRes.rows[0].tier,
+        dedupeKey: `invoice:${invoice.id}`,
+      });
+    } else {
+      console.log(`[webhook] payment_succeeded: no licence linked to customer ${customerId}`);
+    }
+  }
+
+  console.log(`💰 Payment succeeded: ${customerId} (${invoice.billing_reason})`);
 }
 
 async function handlePaymentFailed(invoice) {

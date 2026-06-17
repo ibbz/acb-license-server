@@ -91,6 +91,7 @@ router.post('/checkout', requireAuth, async (req, res) => {
         success_url:    successUrl,
         cancel_url:     cancelUrl,
         metadata: {
+          app:         'acb',
           license_key: req.user.license_key,
           license_id:  String(licenseId),
           bundle_id,
@@ -141,9 +142,18 @@ router.post('/checkout', requireAuth, async (req, res) => {
         success_url:    successUrl,
         cancel_url:     cancelUrl,
         metadata: {
+          app:         'acb',
           license_key: req.user.license_key,
           license_id:  String(licenseId),
           plan,
+        },
+        subscription_data: {
+          metadata: {
+            app:         'acb',
+            license_key: req.user.license_key,
+            license_id:  String(licenseId),
+            plan,
+          },
         },
       });
 
