@@ -7,7 +7,7 @@
  *  1. Validate license key + check credits
  *  2. Deduct credits atomically (before generation — prevents over-use)
  *  3. Call YouTube Data API — search for up to 3 videos
- *  4. Call OpenAI API    — generate featured image (gpt-image-1-mini)
+ *  4. Call OpenAI API    — generate featured image (gpt-image-1.5)
  *  5. Call Anthropic API — generate article content
  *  6. POST results back to WordPress /wp-json/ai-content/v1/publish
  *  7. On any failure after credit deduction — refund credits
@@ -127,7 +127,7 @@ async function searchYouTube(title) {
 }
 
 /**
- * Generate a featured image via OpenAI gpt-image-1-mini.
+ * Generate a featured image via OpenAI gpt-image-1.5.
  * Returns base64 PNG string or null on failure.
  */
 async function generateImage(title, imagePrompt, imageStyle) {
@@ -168,7 +168,7 @@ async function generateImage(title, imagePrompt, imageStyle) {
                 'Authorization': `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
-                model: 'gpt-image-1',
+                model: 'gpt-image-1.5',
                 prompt,
                 n: 1,
                 size: '1024x1024',
@@ -182,7 +182,7 @@ async function generateImage(title, imagePrompt, imageStyle) {
         }
 
         const data = await res.json();
-        // gpt-image-1 returns b64_json by default
+        // gpt-image-1.5 returns b64_json by default
         return data?.data?.[0]?.b64_json || null;
     } catch (err) {
         console.warn('[generate] Image generation failed:', err.message);
@@ -312,6 +312,22 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
     const text = data?.content?.map(b => b.text || '').join('');
     if (!text) throw new Error('Empty response from Anthropic API');
     return text;
+}
+
+/**
+ * Best-effort progress beacon to WordPress. Never throws — a missed stage
+ * update must never affect generation. Used to drive the live status UI.
+ */
+async function postStage(domain, { title, post_id, stage }, secret) {
+    try {
+        await fetch(`https://${domain}/wp-json/ai-content/v1/generation-stage`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'x-generate-secret': secret },
+            body:    JSON.stringify({ title, post_id: post_id || 0, stage }),
+        });
+    } catch (e) {
+        console.warn('[generate] stage beacon failed (non-fatal):', e.message);
+    }
 }
 
 /**
@@ -540,13 +556,24 @@ router.post('/', async (req, res) => {
     let articleText = '';
 
     try {
-        // Run YouTube search and image generation in parallel
-        console.log('[generate] Starting parallel YouTube + image generation...');
+        // Kick off all three independent steps at once. Content is the long pole
+        // and is fatal (its rejection must surface), so we start it here and await
+        // it after the best-effort image/YouTube steps settle. Net wall-clock is
+        // max(content, image, youtube) instead of the old image-then-content sum.
+        postStage(domain, { title, post_id, stage: 'writing' }, process.env.GENERATE_SECRET || '');
+        console.log('[generate] Starting content + image + YouTube concurrently...');
+
+        const contentPromise = generateContent({
+            title, primary_keyword, target_word_count,
+            special_instructions, brand_voice, tone, style_profile,
+            content_type, content_type_meta,
+        });
+
         let ytResults = [], imgResult = null;
         try {
             [ytResults, imgResult] = await Promise.all([
-                include_youtube ? searchYouTube(title) : Promise.resolve([]),
-                include_image !== false ? generateImage(title, image_prompt, image_style) : Promise.resolve(null),
+                include_youtube ? searchYouTube(title).catch(() => []) : Promise.resolve([]),
+                include_image !== false ? generateImage(title, image_prompt, image_style).catch(() => null) : Promise.resolve(null),
             ]);
         } catch (parallelErr) {
             console.warn('[generate] Parallel step error (non-fatal):', parallelErr.message);
@@ -556,13 +583,8 @@ router.post('/', async (req, res) => {
         imageBase64   = imgResult;
         console.log(`[generate] YouTube: ${youtubeVideos.length} results | Image: ${include_image === false ? 'SKIPPED (include_image=false)' : imageBase64 ? 'OK (' + Math.round(imageBase64.length/1024) + 'KB b64)' : 'failed'}`);
 
-        // Generate article content
-        console.log('[generate] Calling Anthropic claude-sonnet-4-5...');
-        const rawArticleText = await generateContent({
-            title, primary_keyword, target_word_count,
-            special_instructions, brand_voice, tone, style_profile,
-            content_type, content_type_meta,
-        });
+        // Await the article (throws on failure → outer catch → refund + 'failed')
+        const rawArticleText = await contentPromise;
         console.log(`[generate] Article generated (${rawArticleText.length} chars)`);
 
         // For quiz content types, extract structured quiz data from Claude's response
@@ -598,7 +620,7 @@ router.post('/', async (req, res) => {
             post_type:          post_type  || 'post',
             acf_field_key:      acf_field_key || '',
             ai_model:           'claude-sonnet-4-5',
-            image_model:        'gpt-image-1',
+            image_model:        'gpt-image-1.5',
             credits_used:       credits,
             execution_time:     Math.round((Date.now() - startTime) / 1000),
             include_youtube:    !!include_youtube,
@@ -627,6 +649,7 @@ router.post('/', async (req, res) => {
             tec_organiser:      tec_organiser    || '',
         };
 
+        await postStage(domain, { title, post_id, stage: 'publishing' }, process.env.GENERATE_SECRET || '');
         await postToWordPress(domain, publishPayload, process.env.GENERATE_SECRET || '');
         console.log(`[generate] COMPLETE — "${title}" in ${publishPayload.execution_time}s`);
 
