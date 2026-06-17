@@ -39,16 +39,26 @@ const BUNDLES = {
     },
 };
 
-router.post('/', async (req, res) => {
-    const { license_key, bundle_id, success_url, cancel_url } = req.body;
+// Subscription plans — price IDs come from Railway env (same vars the webhook uses).
+const PLAN_PRICE_IDS = {
+    starter: process.env.STRIPE_STARTER_PRICE_ID,
+    pro:     process.env.STRIPE_PRO_PRICE_ID,
+    agency:  process.env.STRIPE_AGENCY_PRICE_ID,
+};
 
-    if (!license_key || !bundle_id) {
-        return res.status(400).json({ error: 'license_key and bundle_id are required' });
+router.post('/', async (req, res) => {
+    const { license_key, bundle_id, plan, success_url, cancel_url } = req.body;
+
+    if (!license_key || (!bundle_id && !plan)) {
+        return res.status(400).json({ error: 'license_key and either bundle_id or plan are required' });
     }
 
-    const bundle = BUNDLES[bundle_id];
-    if (!bundle) {
-        return res.status(400).json({ error: `Unknown bundle: ${bundle_id}. Valid options: ${Object.keys(BUNDLES).join(', ')}` });
+    let bundle = null;
+    if (bundle_id) {
+        bundle = BUNDLES[bundle_id];
+        if (!bundle) {
+            return res.status(400).json({ error: `Unknown bundle: ${bundle_id}. Valid options: ${Object.keys(BUNDLES).join(', ')}` });
+        }
     }
 
     // Verify the license key exists and is active
@@ -100,6 +110,50 @@ router.post('/', async (req, res) => {
         ? success_url.replace(/\?.*$/, '')
         : 'https://example.com/wp-admin/admin.php';
 
+    // ── Subscription plan checkout ─────────────────────────────────────────────
+    if (plan) {
+        const planKey = plan.toString().toLowerCase();
+        const priceId = PLAN_PRICE_IDS[planKey];
+        if (!priceId) {
+            return res.status(400).json({
+                error: `No Stripe price configured for plan "${plan}". Set STRIPE_${planKey.toUpperCase()}_PRICE_ID in Railway.`,
+            });
+        }
+
+        try {
+            // Guard against double-subscribing: if there's already an active
+            // subscription, send them to the billing portal to change plan instead.
+            const existing = await stripe.subscriptions.list({ customer: stripeCustomerId, status: 'active', limit: 1 });
+            if (existing.data.length > 0) {
+                const portalSession = await stripe.billingPortal.sessions.create({
+                    customer:   stripeCustomerId,
+                    return_url: `${returnBase}?page=ai-content-bridge`,
+                });
+                return res.json({ success: true, checkout_url: portalSession.url, managed: true });
+            }
+
+            const session = await stripe.checkout.sessions.create({
+                customer:    stripeCustomerId,
+                mode:        'subscription',
+                line_items:  [{ price: priceId, quantity: 1 }],
+                metadata:    { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey },
+                subscription_data: {
+                    metadata: { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey },
+                },
+                success_url: `${returnBase}?page=ai-content-bridge&upgrade=success&plan=${planKey}`,
+                cancel_url:  `${returnBase}?page=ai-content-bridge&upgrade=cancelled`,
+            });
+
+            console.log(`[checkout] Subscription session: ${session.id} | license=${license_key} | plan=${planKey}`);
+            return res.json({ success: true, checkout_url: session.url, session_id: session.id });
+
+        } catch (err) {
+            console.error('[checkout] Stripe subscription session error:', err.message);
+            return res.status(500).json({ error: 'Failed to create subscription checkout session' });
+        }
+    }
+
+    // ── Credit bundle checkout (one-time) ──────────────────────────────────────
     const successUrl = `${returnBase}?page=ai-content-bridge&credits=success&bundle=${bundle_id}&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl  = `${returnBase}?page=ai-content-bridge&credits=cancelled`;
 
