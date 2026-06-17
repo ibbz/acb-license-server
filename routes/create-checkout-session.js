@@ -120,18 +120,30 @@ router.post('/', async (req, res) => {
             });
         }
 
+        // Guard against double-subscribing: if there's already an active
+        // subscription, send them to the billing portal to change plan instead.
         try {
-            // Guard against double-subscribing: if there's already an active
-            // subscription, send them to the billing portal to change plan instead.
             const existing = await stripe.subscriptions.list({ customer: stripeCustomerId, status: 'active', limit: 1 });
             if (existing.data.length > 0) {
-                const portalSession = await stripe.billingPortal.sessions.create({
-                    customer:   stripeCustomerId,
-                    return_url: `${returnBase}?page=ai-content-bridge`,
-                });
-                return res.json({ success: true, checkout_url: portalSession.url, managed: true });
+                try {
+                    const portalSession = await stripe.billingPortal.sessions.create({
+                        customer:   stripeCustomerId,
+                        return_url: `${returnBase}?page=ai-content-bridge`,
+                    });
+                    return res.json({ success: true, checkout_url: portalSession.url, managed: true });
+                } catch (portalErr) {
+                    console.error('[checkout] Billing portal error:', portalErr.message);
+                    return res.status(409).json({
+                        error: `You already have an active subscription, but the Stripe billing portal isn't available: ${portalErr.message}. In test mode, enable it at Stripe → Settings → Billing → Customer portal.`,
+                    });
+                }
             }
+        } catch (listErr) {
+            console.error('[checkout] subscriptions.list error:', listErr.message);
+            // Non-fatal — fall through and attempt to create the checkout session.
+        }
 
+        try {
             const session = await stripe.checkout.sessions.create({
                 customer:    stripeCustomerId,
                 mode:        'subscription',
@@ -148,8 +160,12 @@ router.post('/', async (req, res) => {
             return res.json({ success: true, checkout_url: session.url, session_id: session.id });
 
         } catch (err) {
-            console.error('[checkout] Stripe subscription session error:', err.message);
-            return res.status(500).json({ error: 'Failed to create subscription checkout session' });
+            // Surface the real Stripe reason — almost always a price-ID config issue
+            // (wrong ID, live/test mismatch, archived price, or a non-recurring price).
+            console.error(`[checkout] Stripe subscription session error for plan "${planKey}" (price ${priceId}):`, err.message);
+            return res.status(500).json({
+                error: `Stripe could not start the ${planKey} subscription: ${err.message}`,
+            });
         }
     }
 
