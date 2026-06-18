@@ -18,61 +18,13 @@ const pool = new Pool({
 
 // Import bundle definitions so we stay in sync
 const { BUNDLES } = require('./create-checkout-session');
+const { tierFromPriceId, postsLimitForTier, normaliseInterval } = require('./plans');
+const { grantSubscriptionCredits: grantSharedCredits } = require('../lib/subscription-credits');
 
-// Monthly credit allowance per paid tier (from v2.5 product spec).
-// Free tier credits are granted at registration, not here.
-const CREDIT_ALLOWANCE = { starter: 30, pro: 100, agency: 300 };
-
-// Grant a subscription's monthly credit allowance.
-// No rollover: any leftover from a previous month's subscription grant is zeroed
-// first. One-time bundle credits (notes 'stripe_session:%') and the free grant
-// ('free_tier_initial') are left untouched, so they persist/stack on top.
-// Idempotent per dedupeKey so Stripe webhook retries can't double-grant.
-async function grantSubscriptionCredits({ licenseId, tier, dedupeKey, expiresInDays = 35 }) {
-  const allowance = CREDIT_ALLOWANCE[(tier || '').toLowerCase()];
-  if (!allowance) {
-    console.log(`[webhook] No credit allowance for tier '${tier}' — skipping grant`);
-    return;
-  }
-  const note = `subscription_credits:${dedupeKey}`;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const dup = await client.query(
-      `SELECT id FROM credit_batches WHERE license_key_id = $1 AND notes = $2`,
-      [licenseId, note]
-    );
-    if (dup.rows.length > 0) {
-      await client.query('ROLLBACK');
-      console.log(`[webhook] Duplicate credit grant ignored: ${note}`);
-      return;
-    }
-
-    // No rollover — expire any prior monthly subscription credits for this licence.
-    await client.query(
-      `UPDATE credit_batches
-       SET credits_remaining = 0, updated_at = NOW()
-       WHERE license_key_id = $1 AND notes LIKE 'subscription_credits:%' AND credits_remaining > 0`,
-      [licenseId]
-    );
-
-    await client.query(
-      `INSERT INTO credit_batches
-         (license_key_id, credits_issued, credits_remaining, source, issued_date, expiry_date, notes)
-       VALUES ($1, $2, $2, 'subscription', CURRENT_DATE, CURRENT_DATE + ($3::int * INTERVAL '1 day'), $4)`,
-      [licenseId, allowance, expiresInDays, note]
-    );
-
-    await client.query('COMMIT');
-    console.log(`[webhook] Granted ${allowance} '${tier}' credits to license_id=${licenseId} (${note})`);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('[webhook] grantSubscriptionCredits failed:', err.message);
-    throw err;
-  } finally {
-    client.release();
-  }
+// Thin wrapper so existing call sites stay unchanged — binds the shared grant
+// (no-rollover, 35-day, idempotent) to this module's pool.
+async function grantSubscriptionCredits(args) {
+  return grantSharedCredits(pool, args);
 }
 
 // Note: raw body parsing is handled in server.js before this route
@@ -224,7 +176,7 @@ async function handleCheckoutCompleted(session) {
 // always carries our metadata (license_id, plan), so this works even for a brand-new
 // customer whose stripe_customer_id was created by Stripe during checkout.
 async function handleSubscriptionCheckout(session) {
-  const { license_id, plan } = session.metadata || {};
+  const { license_id, plan, interval } = session.metadata || {};
   const customerId = typeof session.customer === 'string'
     ? session.customer
     : (session.customer && session.customer.id) || null;
@@ -237,10 +189,14 @@ async function handleSubscriptionCheckout(session) {
     return;
   }
 
-  const planKey    = (plan || '').toLowerCase();
-  const tier       = ['starter', 'pro', 'agency'].includes(planKey) ? planKey : 'free';
-  const postsLimit = tier === 'starter' ? 50 : (tier === 'pro' || tier === 'agency') ? -1 : 5;
+  const planKey         = (plan || '').toLowerCase();
+  const tier            = ['starter', 'pro', 'agency'].includes(planKey) ? planKey : 'free';
+  const postsLimit      = postsLimitForTier(tier);
+  const billingInterval = normaliseInterval(interval);
+  const isAnnual        = billingInterval === 'year';
 
+  // For annual: start the monthly drip clock. Month 1 is granted now (below);
+  // months 2-12 are topped up by the cron / lazy sweep using these timestamps.
   await pool.query(`
     UPDATE license_keys
     SET tier = $1,
@@ -249,9 +205,12 @@ async function handleSubscriptionCheckout(session) {
         stripe_customer_id = COALESCE($3, stripe_customer_id),
         stripe_subscription_id = $4,
         stripe_subscription_status = 'active',
+        billing_interval = $5,
+        annual_term_end      = CASE WHEN $6 THEN NOW() + INTERVAL '1 year'  ELSE NULL END,
+        next_credit_grant_at = CASE WHEN $6 THEN NOW() + INTERVAL '1 month' ELSE NULL END,
         updated_at = NOW()
-    WHERE id = $5
-  `, [tier, postsLimit, customerId, subscriptionId, parseInt(license_id)]);
+    WHERE id = $7
+  `, [tier, postsLimit, customerId, subscriptionId, billingInterval, isAnnual, parseInt(license_id)]);
 
   if (customerId) {
     await pool.query(
@@ -260,43 +219,48 @@ async function handleSubscriptionCheckout(session) {
     );
   }
 
-  // First month's credit allowance. Renewals are granted in handlePaymentSucceeded.
+  // First month's credit allowance (same for monthly and annual). Monthly renewals
+  // come via invoice subscription_cycle; annual months 2-12 via the drip sweep.
   await grantSubscriptionCredits({
     licenseId: parseInt(license_id),
     tier,
     dedupeKey: `checkout:${session.id}`,
   });
 
-  console.log(`[webhook] Subscription provisioned: license_id=${license_id} → ${tier} (customer ${customerId})`);
+  console.log(`[webhook] Subscription provisioned: license_id=${license_id} → ${tier} (${billingInterval}, customer ${customerId})`);
 }
 
 async function handleSubscriptionUpdate(subscription) {
   const customerId = subscription.customer;
   const status = subscription.status;
-  const priceId = subscription.items.data[0].price.id;
+  const priceObj = subscription.items.data[0].price;
+  const priceId = priceObj.id;
 
-  // Map Stripe price IDs to tiers (you'll configure these in Stripe Dashboard)
-  const tierMap = {
-    [process.env.STRIPE_STARTER_PRICE_ID]: 'starter',
-    [process.env.STRIPE_PRO_PRICE_ID]: 'pro',
-    [process.env.STRIPE_AGENCY_PRICE_ID]: 'agency'
-  };
+  // Annual-aware: tierFromPriceId knows both monthly and annual price IDs, so an
+  // annual subscription can never silently resolve to 'free'.
+  const tier = tierFromPriceId(priceId);
+  const postsLimit = postsLimitForTier(tier);
+  const priceInterval = normaliseInterval(priceObj.recurring && priceObj.recurring.interval);
+  const isAnnual = priceInterval === 'year';
 
-  const tier = tierMap[priceId] || 'free';
-  const postsLimit = tier === 'starter' ? 50 : tier === 'pro' || tier === 'agency' ? -1 : 5;
-
-  // Update license in database
+  // Update license in database. Keep billing_interval in sync with the live price.
+  // The annual clock is initialised here only if not already set (COALESCE), so a
+  // monthly->annual switch via the billing portal starts the drip without
+  // disturbing an existing annual schedule. Grants never happen here.
   const result = await pool.query(`
-    UPDATE license_keys 
-    SET 
+    UPDATE license_keys
+    SET
       tier = $1,
       status = $2,
       posts_limit = $3,
       stripe_subscription_id = $4,
       stripe_subscription_status = $5,
+      billing_interval = $7,
+      annual_term_end      = CASE WHEN $8 THEN COALESCE(annual_term_end,      NOW() + INTERVAL '1 year')  ELSE NULL END,
+      next_credit_grant_at = CASE WHEN $8 THEN COALESCE(next_credit_grant_at, NOW() + INTERVAL '1 month') ELSE NULL END,
       updated_at = NOW()
     WHERE stripe_customer_id = $6
-  `, [tier, status, postsLimit, subscription.id, status, customerId]);
+  `, [tier, status, postsLimit, subscription.id, status, customerId, priceInterval, isAnnual]);
 
   // If the customer wasn't linked yet (e.g. this event arrived before the checkout
   // session was processed), fall back to linking via our subscription metadata.
@@ -306,18 +270,22 @@ async function handleSubscriptionUpdate(subscription) {
       UPDATE license_keys
       SET tier = $1, status = $2, posts_limit = $3,
           stripe_customer_id = $4, stripe_subscription_id = $5,
-          stripe_subscription_status = $6, updated_at = NOW()
-      WHERE id = $7
-    `, [tier, status, postsLimit, customerId, subscription.id, status, licenseId]);
+          stripe_subscription_status = $6,
+          billing_interval = $7,
+          annual_term_end      = CASE WHEN $8 THEN COALESCE(annual_term_end,      NOW() + INTERVAL '1 year')  ELSE NULL END,
+          next_credit_grant_at = CASE WHEN $8 THEN COALESCE(next_credit_grant_at, NOW() + INTERVAL '1 month') ELSE NULL END,
+          updated_at = NOW()
+      WHERE id = $9
+    `, [tier, status, postsLimit, customerId, subscription.id, status, priceInterval, isAnnual, licenseId]);
     await pool.query(
       `UPDATE users SET stripe_customer_id = $1 WHERE id = (SELECT user_id FROM license_keys WHERE id = $2)`,
       [customerId, licenseId]
     );
-    console.log(`[webhook] Subscription linked via metadata.license_id=${licenseId} → ${tier} (${status})`);
+    console.log(`[webhook] Subscription linked via metadata.license_id=${licenseId} → ${tier} (${status}, ${priceInterval})`);
     return;
   }
 
-  console.log(`✅ Subscription updated: ${customerId} → ${tier} (${status})`);
+  console.log(`✅ Subscription updated: ${customerId} → ${tier} (${status}, ${priceInterval})`);
 }
 
 async function handleSubscriptionCancelled(subscription) {
@@ -330,6 +298,9 @@ async function handleSubscriptionCancelled(subscription) {
       status = 'cancelled',
       posts_limit = 5,
       stripe_subscription_status = 'cancelled',
+      billing_interval = 'month',
+      annual_term_end = NULL,
+      next_credit_grant_at = NULL,
       updated_at = NOW()
     WHERE stripe_customer_id = $1
   `, [customerId]);
@@ -355,13 +326,28 @@ async function handlePaymentSucceeded(invoice) {
   // billing_reason 'subscription_create', so we skip it here to avoid double-granting.
   if (invoice.billing_reason === 'subscription_cycle') {
     const licRes = await pool.query(
-      `SELECT id, tier FROM license_keys WHERE stripe_customer_id = $1`,
+      `SELECT id, tier, billing_interval FROM license_keys WHERE stripe_customer_id = $1`,
       [customerId]
     );
     if (licRes.rows.length > 0) {
+      const lic = licRes.rows[0];
+
+      // Annual renewal fires once a year. Restart the term and the monthly drip
+      // clock, then grant the first month of the new year. Months 2-12 are handled
+      // by the cron / lazy sweep.
+      if (lic.billing_interval === 'year') {
+        await pool.query(`
+          UPDATE license_keys
+          SET annual_term_end      = NOW() + INTERVAL '1 year',
+              next_credit_grant_at = NOW() + INTERVAL '1 month',
+              updated_at = NOW()
+          WHERE id = $1
+        `, [lic.id]);
+      }
+
       await grantSubscriptionCredits({
-        licenseId: licRes.rows[0].id,
-        tier:      licRes.rows[0].tier,
+        licenseId: lic.id,
+        tier:      lic.tier,
         dedupeKey: `invoice:${invoice.id}`,
       });
     } else {

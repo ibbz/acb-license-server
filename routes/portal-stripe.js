@@ -10,19 +10,13 @@ const { requireAuth } = require('./portal-auth');
 
 // Reuse existing bundle definitions — keeps everything in sync
 const { BUNDLES } = require('./create-checkout-session');
+const { getPlanPriceId, normaliseInterval } = require('./plans');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const pool   = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
-
-// Subscription Price IDs — same env vars the webhook already uses
-const PLAN_PRICE_IDS = {
-  starter: process.env.STRIPE_STARTER_PRICE_ID,
-  pro:     process.env.STRIPE_PRO_PRICE_ID,
-  agency:  process.env.STRIPE_AGENCY_PRICE_ID,
-};
 
 // ── POST /api/portal/stripe-portal ───────────────────────────────────────
 router.post('/stripe-portal', requireAuth, async (req, res) => {
@@ -58,7 +52,7 @@ router.post('/stripe-portal', requireAuth, async (req, res) => {
 
 // ── POST /api/portal/checkout ─────────────────────────────────────────────
 router.post('/checkout', requireAuth, async (req, res) => {
-  const { type, bundle_id, plan } = req.body;
+  const { type, bundle_id, plan, interval } = req.body;
 
   try {
     const licRes = await pool.query(
@@ -116,10 +110,14 @@ router.post('/checkout', requireAuth, async (req, res) => {
 
     // ── PLAN UPGRADE ─────────────────────────────────────────────────────
     if (type === 'upgrade') {
-      const priceId = PLAN_PRICE_IDS[plan?.toLowerCase()];
+      const billingInterval = normaliseInterval(interval);
+      const priceId = getPlanPriceId(plan, billingInterval);
       if (!priceId) {
+        const envName = billingInterval === 'year'
+          ? `STRIPE_${String(plan).toUpperCase()}_ANNUAL_PRICE_ID`
+          : `STRIPE_${String(plan).toUpperCase()}_PRICE_ID`;
         return res.status(400).json({
-          error: `Price not configured for plan "${plan}". Add STRIPE_${plan?.toUpperCase()}_PRICE_ID to Railway variables.`
+          error: `Price not configured for plan "${plan}" (${billingInterval}). Add ${envName} to Railway variables.`
         });
       }
 
@@ -157,6 +155,7 @@ router.post('/checkout', requireAuth, async (req, res) => {
           license_key: req.user.license_key,
           license_id:  String(licenseId),
           plan,
+          interval:    billingInterval,
         },
         subscription_data: {
           metadata: {
@@ -164,6 +163,7 @@ router.post('/checkout', requireAuth, async (req, res) => {
             license_key: req.user.license_key,
             license_id:  String(licenseId),
             plan,
+            interval:    billingInterval,
           },
         },
       });

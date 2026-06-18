@@ -116,11 +116,10 @@ const generateLimiter = rateLimit({
 });
 app.use('/api/generate', generateLimiter);
 
-// Free registration limiter.
-// NOTE: max is set high for testing — set back to 3 before public launch.
+// Free registration limiter: max 3 per IP per hour.
 const freeRegLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: 3,
   message: { success: false, error: 'Too many registration attempts. Please try again later.' }
 });
 app.use('/api/register-free', freeRegLimiter);
@@ -154,6 +153,7 @@ app.use('/api/portal',                  require('./routes/portal-magic'));
 app.use('/api/portal',                  require('./routes/portal-stripe'));
 app.use('/api/portal/support',          require('./routes/portal-support'));
 app.use('/api/beta-feedback',           require('./routes/beta-feedback'));
+app.use('/api/cron',                    require('./routes/cron'));
 
 // Email verification page (GET — renders HTML; sets its own CSP).
 app.use('/verify-email',                require('./routes/verify-email'));

@@ -39,15 +39,11 @@ const BUNDLES = {
     },
 };
 
-// Subscription plans — price IDs come from Railway env (same vars the webhook uses).
-const PLAN_PRICE_IDS = {
-    starter: process.env.STRIPE_STARTER_PRICE_ID,
-    pro:     process.env.STRIPE_PRO_PRICE_ID,
-    agency:  process.env.STRIPE_AGENCY_PRICE_ID,
-};
+// Subscription plan price IDs (monthly + annual) resolve through the shared map.
+const { getPlanPriceId, normaliseInterval } = require('./plans');
 
 router.post('/', async (req, res) => {
-    const { license_key, bundle_id, plan, success_url, cancel_url } = req.body;
+    const { license_key, bundle_id, plan, interval, success_url, cancel_url } = req.body;
 
     if (!license_key || (!bundle_id && !plan)) {
         return res.status(400).json({ error: 'license_key and either bundle_id or plan are required' });
@@ -113,10 +109,14 @@ router.post('/', async (req, res) => {
     // ── Subscription plan checkout ─────────────────────────────────────────────
     if (plan) {
         const planKey = plan.toString().toLowerCase();
-        const priceId = PLAN_PRICE_IDS[planKey];
+        const billingInterval = normaliseInterval(interval);
+        const priceId = getPlanPriceId(planKey, billingInterval);
         if (!priceId) {
+            const envName = billingInterval === 'year'
+                ? `STRIPE_${planKey.toUpperCase()}_ANNUAL_PRICE_ID`
+                : `STRIPE_${planKey.toUpperCase()}_PRICE_ID`;
             return res.status(400).json({
-                error: `No Stripe price configured for plan "${plan}". Set STRIPE_${planKey.toUpperCase()}_PRICE_ID in Railway.`,
+                error: `No Stripe price configured for plan "${plan}" (${billingInterval}). Set ${envName} in Railway.`,
             });
         }
 
@@ -148,15 +148,15 @@ router.post('/', async (req, res) => {
                 customer:    stripeCustomerId,
                 mode:        'subscription',
                 line_items:  [{ price: priceId, quantity: 1 }],
-                metadata:    { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey },
+                metadata:    { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey, interval: billingInterval },
                 subscription_data: {
-                    metadata: { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey },
+                    metadata: { app: 'acb', license_key, license_id: licenseId.toString(), plan: planKey, interval: billingInterval },
                 },
                 success_url: `${returnBase}?page=ai-content-bridge&upgrade=success&plan=${planKey}`,
                 cancel_url:  `${returnBase}?page=ai-content-bridge&upgrade=cancelled`,
             });
 
-            console.log(`[checkout] Subscription session: ${session.id} | license=${license_key} | plan=${planKey}`);
+            console.log(`[checkout] Subscription session: ${session.id} | license=${license_key} | plan=${planKey} | interval=${billingInterval}`);
             return res.json({ success: true, checkout_url: session.url, session_id: session.id });
 
         } catch (err) {

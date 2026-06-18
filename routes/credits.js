@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
+const { grantDueAnnualCredits } = require('../lib/subscription-credits');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -31,6 +32,16 @@ router.get('/', async (req, res) => {
   }
 
   try {
+    // Lazy safety-net for annual subscribers: if this licence is an annual plan
+    // that's due a monthly top-up, grant it now so the balance below is current —
+    // even if no scheduler is hitting /api/cron/grant-due. Cheap (indexed) and a
+    // no-op for everyone else; never allowed to break the balance read.
+    try {
+      await grantDueAnnualCredits(pool, { licenseKey });
+    } catch (dripErr) {
+      console.error('[credits] annual top-up check failed (non-fatal):', dripErr.message);
+    }
+
     console.log('Fetching credit batches for license key...');
 
     // Get total remaining credits from non-expired batches
