@@ -87,7 +87,18 @@ router.post('/checkout', requireAuth, async (req, res) => {
         mode:           'payment',
         customer:       customerId || undefined,
         customer_email: customerId ? undefined : req.user.email,
-        line_items:     [{ price: bundle.stripe_price_id, quantity: 1 }],
+        line_items: [{
+          price_data: {
+            currency:     'usd',
+            product_data: {
+              name:        bundle.name,
+              description: bundle.description,
+              metadata:    { bundle_id, credits: String(bundle.credits) },
+            },
+            unit_amount: bundle.price_cents,
+          },
+          quantity: 1,
+        }],
         success_url:    successUrl,
         cancel_url:     cancelUrl,
         metadata: {
