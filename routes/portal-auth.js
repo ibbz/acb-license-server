@@ -90,13 +90,16 @@ router.post('/me', requireAuth, async (req, res) => {
         lk.license_key,
         lk.tier,
         lk.status,
-        COALESCE(SUM(cb.credits_issued), 0) AS credits_remaining
+        lk.registered_domain,
+        COALESCE((
+          SELECT SUM(cb.credits_remaining)
+          FROM credit_batches cb
+          WHERE cb.license_key_id = lk.id
+            AND cb.expiry_date > CURRENT_DATE
+        ), 0) AS credits_remaining
       FROM free_registrations fr
       JOIN license_keys lk ON lk.id = fr.license_key_id
-      LEFT JOIN credit_batches cb ON cb.license_key_id = lk.id
       WHERE fr.id = $1
-      GROUP BY fr.id, fr.email,
-               lk.license_key, lk.tier, lk.status
     `, [req.user.sub]);
 
     if (accountRes.rows.length === 0) {
