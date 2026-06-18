@@ -154,6 +154,9 @@ app.use('/api/portal',                  require('./routes/portal-stripe'));
 app.use('/api/portal/support',          require('./routes/portal-support'));
 app.use('/api/beta-feedback',           require('./routes/beta-feedback'));
 app.use('/api/cron',                    require('./routes/cron'));
+app.use('/api/plugin',                  require('./routes/plugin-updates'));
+app.use('/api/portal',                  require('./routes/portal-download'));
+app.use('/api/admin',                   require('./routes/admin-releases'));
 
 // Email verification page (GET — renders HTML; sets its own CSP).
 app.use('/verify-email',                require('./routes/verify-email'));
