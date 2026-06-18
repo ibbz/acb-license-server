@@ -129,7 +129,8 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0-acb'
+    version: '1.0.0-acb',
+    r2: require('./lib/r2').diagnose()
   });
 });
 
