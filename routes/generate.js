@@ -23,11 +23,20 @@ const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
 const { CONTENT_TYPES, canAccessContentType, buildPrompt } = require('../content-types');
+const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
+const serp = require('../lib/serp');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+
+// Content types that benefit from live SERP grounding (web-facing, keyword-led).
+// Others (quizzes, SOPs, listings, etc.) skip grounding — it would add noise.
+const SERP_GROUNDING_TYPES = new Set([
+    'blog_post', 'tutorial', 'faq_page', 'service_page', 'about_us',
+    'landing_page', 'review_comparison', 'explainer_guide',
+]);
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -240,6 +249,29 @@ function parseQuizData(text) {
     }
 }
 
+/**
+ * Turn an approved outline (from the /api/outline review step) into a prompt
+ * block instructing Claude to follow that structure.
+ */
+function renderApprovedOutline(outline) {
+    if (!outline || typeof outline !== 'object') return '';
+    const lines = ['**FOLLOW THIS APPROVED OUTLINE — the user has reviewed and confirmed this structure. Honour the headings and points; expand each into full content.**'];
+    if (outline.suggested_title) lines.push(`\nWorking title: ${outline.suggested_title}`);
+    if (Array.isArray(outline.sections)) {
+        outline.sections.forEach((s, i) => {
+            lines.push(`\n${i + 1}. ${s.heading || ''}`);
+            if (Array.isArray(s.points)) s.points.forEach(p => lines.push(`   - ${p}`));
+        });
+    }
+    if (Array.isArray(outline.faq) && outline.faq.length) {
+        lines.push(`\nInclude an FAQ section answering: ${outline.faq.join(' | ')}`);
+    }
+    if (outline.content_gap) {
+        lines.push(`\nIMPORTANT differentiator — make sure the article delivers this angle that competitors miss: ${outline.content_gap}`);
+    }
+    return lines.join('\n');
+}
+
 async function generateContent(payload) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured on server');
@@ -248,12 +280,36 @@ async function generateContent(payload) {
         title, primary_keyword, target_word_count,
         special_instructions, brand_voice, tone, style_profile,
         content_type, content_type_meta,
+        approved_outline, serp_gl, serp_hl,
     } = payload;
 
     // Build the user prompt using the content type template
     const activeContentType = content_type || 'blog_post';
-    const userPrompt = buildPrompt(activeContentType, title, primary_keyword, target_word_count, content_type_meta);
+    let userPrompt = buildPrompt(activeContentType, title, primary_keyword, target_word_count, content_type_meta);
     console.log(`[generate] Content type: ${activeContentType}`);
+
+    // ── SEO grounding ───────────────────────────────────────────────────────
+    // If an approved outline was supplied (outline-review flow) it already carries
+    // its SERP grounding — inject it and skip a second SERP call. Otherwise, for
+    // keyword-led web content, fetch live SERP grounding so the article covers
+    // what's actually ranking. Both are advisory and fail soft.
+    if (approved_outline) {
+        userPrompt = renderApprovedOutline(approved_outline) + '\n\n---\n\n' + userPrompt;
+        console.log('[generate] Using approved outline from review step');
+    } else if (serp.enabled() && primary_keyword && SERP_GROUNDING_TYPES.has(activeContentType)) {
+        try {
+            const ground = await serp.getSerpGrounding(primary_keyword, {
+                gl: serp_gl || process.env.SERP_DEFAULT_GL || 'us',
+                hl: serp_hl || 'en',
+            });
+            if (ground) {
+                userPrompt = serp.groundingToPromptBlock(ground) + '\n\n---\n\n' + userPrompt;
+                console.log(`[generate] SERP grounding applied: ${ground.competitors.length} pages, ${ground.commonTopics.length} common topics, ${ground.peopleAlsoAsk.length} PAA`);
+            }
+        } catch (e) {
+            console.warn('[generate] SERP grounding skipped (non-fatal):', e.message);
+        }
+    }
 
     // Build system prompt — includes brand voice, tone, and active style profile
     const styleProfileBlock = style_profile?.profile ? `
@@ -459,6 +515,10 @@ router.post('/', async (req, res) => {
         lms_lesson_id,
         lms_section_id,
         ld_post_type,
+        // SEO outline-review flow (optional)
+        approved_outline,
+        serp_gl,
+        serp_hl,
     } = req.body;
 
     // Basic validation
@@ -567,6 +627,7 @@ router.post('/', async (req, res) => {
             title, primary_keyword, target_word_count,
             special_instructions, brand_voice, tone, style_profile,
             content_type, content_type_meta,
+            approved_outline, serp_gl, serp_hl,
         });
 
         let ytResults = [], imgResult = null;
@@ -596,6 +657,27 @@ router.post('/', async (req, res) => {
             console.log(`[generate] Quiz data extracted: ${quizData ? quizData.questions?.length + ' questions' : 'not found — will use markdown only'}`);
         } else {
             articleText = rawArticleText;
+        }
+
+        // ── SEO score ─────────────────────────────────────────────────────
+        // Deterministic, dependency-free. Runs on every content type. Parses
+        // the SEO_DATA block Claude emitted, then scores the article against it.
+        let seoReport = null;
+        try {
+            const seoMeta = parseSeoBlock(rawArticleText);
+            seoReport = scoreSeo({
+                content:         articleText,
+                title,
+                metaTitle:       seoMeta.metaTitle,
+                metaDescription: seoMeta.metaDescription,
+                focusKeyword:    seoMeta.focusKeyword || primary_keyword || title,
+                targetWordCount: target_word_count || 600,
+                hasImage:        !!imageBase64,
+                videoCount:      youtubeVideos.length,
+            });
+            console.log(`[generate] SEO score ${seoReport.score}/100 (${seoReport.grade})`);
+        } catch (e) {
+            console.warn('[generate] SEO scoring skipped (non-fatal):', e.message);
         }
 
         // Upload image to WordPress via the plugin's /upload-image endpoint
@@ -639,6 +721,10 @@ router.post('/', async (req, res) => {
             ld_post_type:       ld_post_type    || '',
             // Structured quiz data (null for non-quiz content types)
             quiz_data:          quizData        || null,
+            // SEO score + checklist (null if scoring failed)
+            seo_score:          seoReport ? seoReport.score : null,
+            seo_grade:          seoReport ? seoReport.grade : null,
+            seo_report:         seoReport       || null,
             mailpoet_list_id:   mailpoet_list_id || 0,
             tnp_list_id:        tnp_list_id      || 0,
             tec_start_date:     tec_start_date   || '',
