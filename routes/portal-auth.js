@@ -152,4 +152,11 @@ function buildUserObj(row) {
   };
 }
 
-module.exports = { router, requireAuth };
+// Single source of truth for the customer portal page URL. Set PORTAL_URL to the
+// site origin (e.g. https://aicontentbridge.com); the portal page is portal.html.
+function portalUrl() {
+  const base = (process.env.PORTAL_URL || 'https://aicontentbridge.com').replace(/\/+$/, '');
+  return `${base}/portal.html`;
+}
+
+module.exports = { router, requireAuth, portalUrl };

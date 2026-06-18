@@ -6,7 +6,7 @@ const express = require('express');
 const router  = express.Router();
 const Stripe  = require('stripe');
 const { Pool } = require('pg');
-const { requireAuth } = require('./portal-auth');
+const { requireAuth, portalUrl } = require('./portal-auth');
 
 // Reuse existing bundle definitions — keeps everything in sync
 const { BUNDLES } = require('./create-checkout-session');
@@ -32,9 +32,7 @@ router.post('/stripe-portal', requireAuth, async (req, res) => {
       });
     }
 
-    const returnUrl = process.env.PORTAL_URL
-      ? `${process.env.PORTAL_URL}/portal`
-      : (req.headers.origin || 'https://aicontentbridge.com') + '/portal';
+    const returnUrl = portalUrl();
 
     const session = await stripe.billingPortal.sessions.create({
       customer:   result.rows[0].stripe_customer_id,

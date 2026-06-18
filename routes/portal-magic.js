@@ -8,6 +8,7 @@ const crypto  = require('crypto');
 const jwt     = require('jsonwebtoken');
 const { Resend } = require('resend');
 const { Pool }   = require('pg');
+const { portalUrl } = require('./portal-auth');
 
 const pool    = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 // Lazy, guarded Resend client — keeps the server booting even if
@@ -55,17 +56,15 @@ router.post('/magic-request', async (req, res) => {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    const exp   = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+    const exp   = new Date(Date.now() + 30 * 60 * 1000); // 30 min
 
     await pool.query(`
       INSERT INTO portal_magic_tokens (user_id, token, expires_at)
       VALUES ($1, $2, $3)
     `, [user.id, token, exp]);
 
-    // Magic link points at the ACB customer portal (portal.html), matching the
-    // ${PORTAL_URL}/portal convention used by portal-stripe.js. portal.html reads ?magic=.
-    const baseUrl = process.env.PORTAL_URL || 'https://aicontentbridge.com';
-    const link    = `${baseUrl}/portal?magic=${token}`;
+    // Magic link points at the ACB customer portal (portal.html). portal.html reads ?magic=.
+    const link = `${portalUrl()}?magic=${token}`;
 
     await getResend()?.emails.send({
       from:    process.env.RESEND_FROM_EMAIL || 'AI Content Bridge <noreply@aicontentbridge.com>',
@@ -79,7 +78,7 @@ router.post('/magic-request', async (req, res) => {
           </div>
           <div style="background:#fff;border-radius:10px;padding:28px 24px;">
             <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.6;">
-              Click the button below to sign in to your customer portal. This link expires in <strong>15 minutes</strong>.
+              Click the button below to sign in to your customer portal. This link expires in <strong>30 minutes</strong>.
             </p>
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
               <tr><td align="center">
