@@ -1,0 +1,12 @@
+name: ACB annual credit drip
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily 03:00 UTC
+  workflow_dispatch:        # lets you trigger a manual test run
+jobs:
+  grant-due:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST https://acb-license-server-production.up.railway.app/api/cron/grant-due \
+            -H "x-cron-secret: ${{ secrets.ACB_CRON_SECRET }}"

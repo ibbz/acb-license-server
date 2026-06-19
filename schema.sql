@@ -31,8 +31,9 @@ CREATE TABLE users (
 
 -- ── 2. license_keys ──────────────────────────────────────────────────────────
 -- Slimmed: dropped seats_limit, institution_name/url/type, brand_settings,
--- custom_labels, billing_interval, trial_end, current_period_end,
--- cancel_at_period_end (LearnBridge-only / unused by ACB).
+-- custom_labels, trial_end, current_period_end, cancel_at_period_end
+-- (LearnBridge-only / unused by ACB). billing_interval and the annual-drip
+-- columns are retained below — ACB's subscription webhook and credit drip use them.
 CREATE TABLE license_keys (
     id                          BIGSERIAL PRIMARY KEY,
     user_id                     BIGINT NOT NULL,
@@ -46,6 +47,9 @@ CREATE TABLE license_keys (
     stripe_subscription_status  VARCHAR(50),
     stripe_customer_id          VARCHAR(255),
     stripe_price_id             TEXT,
+    billing_interval            VARCHAR(10),
+    annual_term_end             TIMESTAMP,
+    next_credit_grant_at        TIMESTAMP,
     monthly_credit_limit        INTEGER NOT NULL DEFAULT 5,
     registered_domain           VARCHAR(255),
     domain_locked_at            TIMESTAMP,
