@@ -75,8 +75,15 @@ router.get('/', async (req, res) => {
     }
 
     const { tier, monthly_credit_limit } = tierResult.rows[0];
+    // Allowance is derived from the tier (the source of truth). The stored
+    // monthly_credit_limit column is NOT NULL DEFAULT 5 and isn't updated on
+    // upgrade, so honour it ONLY when deliberately raised above the tier default
+    // (i.e. a custom plan) — otherwise paid licences would report the free/5 value.
     const TIER_LIMITS = { free: 5, starter: 30, pro: 100, agency: 300 };
-    const effectiveLimit = monthly_credit_limit !== null ? monthly_credit_limit : (TIER_LIMITS[tier] || 5);
+    const tierDefault = TIER_LIMITS[tier] || 5;
+    const effectiveLimit = (monthly_credit_limit != null && monthly_credit_limit > tierDefault)
+      ? monthly_credit_limit
+      : tierDefault;
     const { credits_remaining, next_expiry_date, active_batches } = creditsResult.rows[0];
 
     const finalCredits = parseInt(credits_remaining) || 0;
