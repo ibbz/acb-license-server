@@ -143,6 +143,10 @@ First, the reassuring part: **a failed generation doesn't cost you credits.** Cr
 
 **"This license is registered to [domain]…"** — a licence locks to the **first domain** it's used on. Using it on a different domain is blocked, and the message names the domain it's tied to. To move it to a new site, contact support to transfer it.
 
+## I'm on an annual plan but only see one month's credits
+
+That's expected, not a shortfall. Annual plans release your allowance as a **monthly drip** — you receive one month's credits at a time across the year, on the same cadence a monthly subscriber would, rather than a full year's worth in one lump. Each month's batch arrives automatically; the portal shows your current balance and your next renewal date. Because credits don't roll over from month to month, the drip is also what stops a year's allowance from expiring unused.
+
 ## "Unauthorised" or a 401 when generating
 
 This is a service-side authentication issue between the plugin and the generation server, not something wrong with your content or licence — it most often appears right after a security update on our side. Try reinstalling the plugin and re-saving your licence key first. If it persists, raise a support ticket; it's a configuration matter we resolve at the server end.
