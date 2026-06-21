@@ -519,6 +519,8 @@ router.post('/', async (req, res) => {
         approved_outline,
         serp_gl,
         serp_hl,
+        // Round-tripped back to /publish so WordPress matches the exact diary entry
+        entry_id,
     } = req.body;
 
     // Basic validation
@@ -698,6 +700,9 @@ router.post('/', async (req, res) => {
             title,
             content: articleText,
             status: 'draft',
+            // Exact diary entry that requested this — WordPress matches on it first
+            // so a duplicate title can't attach the result to the wrong entry.
+            entry_id:           entry_id   || null,
             post_id:            post_id    || null,
             post_type:          post_type  || 'post',
             acf_field_key:      acf_field_key || '',
