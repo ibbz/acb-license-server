@@ -374,11 +374,18 @@ Output the content in clean Markdown first, then the SEO_DATA block. Nothing els
     const formattingRules = `
 **FORMATTING RULES:**
 - Use proper Markdown: ## for H2, ### for H3, **bold**, *italic*
+- Do NOT repeat the title and do NOT use a level-1 heading (a single #, i.e. H1) anywhere — the page already displays the title above your content. Begin with your opening paragraph and use ## for the first section heading.
 - Leave a blank line between every paragraph
 - Leave a blank line before and after every heading
 - Leave a blank line before and after every list
 - Do not stack headings — always have at least one paragraph between headings
-- Keep paragraphs to 3-5 sentences maximum for readability`;
+- Keep paragraphs to 3-5 sentences maximum for readability
+
+**STYLED COMPONENTS — use these EXACT formats so they render as designed:**
+- Callouts: to flag a tip, caution, or note, write it as its own paragraph that begins with a bold label and a colon, then the text. Use only these labels: **Pro tip:**, **Warning:**, or **Note:**. Example: **Pro tip:** Batch related edits so you only test once.
+- Key takeaways: where a short summary of the main points helps the reader, add a heading titled exactly "## Key takeaways" immediately followed (with no paragraph in between) by a 3-5 item bullet list.
+- FAQ section: when an article includes a FAQ as one of its sections, title that section exactly "## Frequently Asked Questions" and write each question as an H3 heading ("### How do I …?") with its answer in the paragraph(s) directly beneath it. (This does not apply to a dedicated FAQ Page, which keeps its own question format.)
+- Step-by-step procedures: when the content presents an explicit sequence of actions to follow in order, format each step as an H3 heading titled exactly "### Step 1: short title" (then "### Step 2: …", and so on), with that step's details in the paragraph(s) beneath it. Use this only for genuine procedures — not for general listicle or "N ways to…" sections.`;
 
     switch (contentTypeId) {
 
@@ -394,10 +401,11 @@ Output the content in clean Markdown first, then the SEO_DATA block. Nothing els
 3. Use clear H2 and H3 subheadings that target secondary/LSI keywords
 4. Include relevant statistics, expert opinions, or real-world examples to satisfy E-E-A-T signals
 5. Use bullet points and numbered lists where they genuinely aid readability
-6. Add a FAQ section at the end with 4-6 questions (schema-ready format)
-7. End with a clear, helpful CTA that feels natural — not salesy
-8. Aim for a Flesch reading ease score of 60 or higher
-9. Do NOT use filler phrases like "In today's world", "In conclusion", "It's worth noting", or "Delve into"
+6. Immediately after the introduction, add a "## Key takeaways" summary — the heading followed straight away (no paragraph in between) by a 3-5 item bullet list of the article's main points
+7. Add a FAQ section near the end titled exactly "## Frequently Asked Questions", with 4-6 questions, each written as an H3 heading ("### …?") with its answer directly below
+8. End with a clear, helpful CTA that feels natural — not salesy
+9. Aim for a Flesch reading ease score of 60 or higher
+10. Do NOT use filler phrases like "In today's world", "In conclusion", "It's worth noting", or "Delve into"
 ${formattingRules}
 ${seoBlock}`;
 
@@ -412,7 +420,7 @@ ${seoBlock}`;
 **TUTORIAL REQUIREMENTS:**
 1. Open with what the reader will achieve by the end
 2. List prerequisites (tools, knowledge, or materials needed)
-3. Number every step clearly — each step gets its own H3 heading
+3. Format each step as an H3 heading titled exactly "Step N: short title" (e.g. "### Step 1: Gather your tools"), with that step's details in the paragraph(s) below it
 4. Include tips, warnings, or "Pro tip" callouts where relevant
 5. Add a "Troubleshooting" section covering common mistakes
 6. End with next steps or related tutorials

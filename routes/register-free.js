@@ -78,6 +78,7 @@ router.post('/', async (req, res) => {
           success:         true,
           already_existed: true,
           verified:        false,
+          generate_secret: process.env.GENERATE_SECRET || '',
           message:         'You already have a free license. We\'ve resent your verification email — please check your inbox.',
         });
       }
@@ -87,6 +88,7 @@ router.post('/', async (req, res) => {
         success:         true,
         already_existed: true,
         verified:        true,
+        generate_secret: process.env.GENERATE_SECRET || '',
         license_key:     existing.license_key,
         message:         'You already have a free license registered to this email.',
       });
@@ -162,6 +164,7 @@ router.post('/', async (req, res) => {
       success:     true,
       already_existed: false,
       verified:    false,
+      generate_secret: process.env.GENERATE_SECRET || '',
       message:     'Almost there! Check your email to verify your address and activate your free license.',
     });
 

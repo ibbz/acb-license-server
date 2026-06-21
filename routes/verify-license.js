@@ -69,6 +69,7 @@ router.post('/', async (req, res) => {
       plan:              license.tier,             // 'free' | 'starter' | 'pro' | 'agency'
       credits_remaining: creditsRemaining,
       email:             license.user_email,
+      generate_secret:   process.env.GENERATE_SECRET || '',
     });
 
   } catch (err) {
