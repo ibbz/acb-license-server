@@ -18,13 +18,19 @@ const pool = new Pool({
 
 // Import bundle definitions so we stay in sync
 const { BUNDLES } = require('./create-checkout-session');
-const { tierFromPriceId, postsLimitForTier, normaliseInterval } = require('./plans');
-const { grantSubscriptionCredits: grantSharedCredits } = require('../lib/subscription-credits');
+const { tierFromPriceId, postsLimitForTier, normaliseInterval, TIER_RANK } = require('./plans');
+const { grantSubscriptionCredits: grantSharedCredits, grantUpgradeCredits: grantUpgradeShared } = require('../lib/subscription-credits');
 
 // Thin wrapper so existing call sites stay unchanged — binds the shared grant
 // (no-rollover, 35-day, idempotent) to this module's pool.
 async function grantSubscriptionCredits(args) {
   return grantSharedCredits(pool, args);
+}
+
+// Additive upgrade grant (adds the new tier's allowance on top, no zeroing),
+// bound to this module's pool.
+async function grantUpgradeCredits(args) {
+  return grantUpgradeShared(pool, args);
 }
 
 // Note: raw body parsing is handled in server.js before this route
@@ -243,6 +249,20 @@ async function handleSubscriptionUpdate(subscription) {
   const priceInterval = normaliseInterval(priceObj.recurring && priceObj.recurring.interval);
   const isAnnual = priceInterval === 'year';
 
+  // Capture the tier BEFORE we overwrite it, so a genuine mid-cycle upgrade can be
+  // detected and credited below. (This handler also fires for non-tier changes —
+  // payment method, cancel toggles, status — which must NOT grant.)
+  let oldTier = null, upgradeLicenseId = null;
+  try {
+    const pre = await pool.query(
+      `SELECT id, tier FROM license_keys WHERE stripe_customer_id = $1`,
+      [customerId]
+    );
+    if (pre.rows.length > 0) { oldTier = pre.rows[0].tier; upgradeLicenseId = pre.rows[0].id; }
+  } catch (e) {
+    console.error('[webhook] pre-update tier read failed:', e.message);
+  }
+
   // Update license in database. Keep billing_interval in sync with the live price.
   // The annual clock is initialised here only if not already set (COALESCE), so a
   // monthly->annual switch via the billing portal starts the drip without
@@ -283,6 +303,28 @@ async function handleSubscriptionUpdate(subscription) {
     );
     console.log(`[webhook] Subscription linked via metadata.license_id=${licenseId} → ${tier} (${status}, ${priceInterval})`);
     return;
+  }
+
+  // Mid-cycle UPGRADE → add the new tier's allowance on top of the existing
+  // balance (unused monthly + bundles preserved). Upgrades only:
+  //   • skip downgrades (would otherwise yank credits away mid-period), and
+  //   • skip free→paid (a brand-new subscription is credited at checkout).
+  // Deduped per subscription+price+period so duplicate events and same-period
+  // upgrade/downgrade churn can't re-add. Renewal still resets to a clean
+  // allowance (the upgrade batch is in the 'subscription_credits:' family the
+  // no-rollover renewal sweep clears).
+  if (
+    upgradeLicenseId &&
+    oldTier && TIER_RANK[oldTier] >= TIER_RANK.starter &&
+    typeof TIER_RANK[tier] === 'number' && TIER_RANK[tier] > TIER_RANK[oldTier]
+  ) {
+    const dedupeKey = `${subscription.id}:${priceId}:${subscription.current_period_start}`;
+    try {
+      await grantUpgradeCredits({ licenseId: upgradeLicenseId, tier, dedupeKey });
+      console.log(`[webhook] Upgrade detected ${oldTier} → ${tier} (license_id=${upgradeLicenseId}) — credits topped up`);
+    } catch (e) {
+      console.error('[webhook] upgrade credit grant failed:', e.message);
+    }
   }
 
   console.log(`✅ Subscription updated: ${customerId} → ${tier} (${status}, ${priceInterval})`);

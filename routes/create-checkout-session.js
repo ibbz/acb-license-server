@@ -120,21 +120,42 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Guard against double-subscribing: if there's already an active
-        // subscription, send them to the billing portal to change plan instead.
+        // Existing active subscription → don't create a second one. Deep-link the
+        // billing portal straight to a "confirm switch to <plan>" screen for the
+        // exact plan the user clicked, then redirect back to the plugin on
+        // completion. Falls back to the generic portal if the current item can't be
+        // resolved. (Requires plan switching enabled in the Stripe Customer Portal.)
         try {
             const existing = await stripe.subscriptions.list({ customer: stripeCustomerId, status: 'active', limit: 1 });
             if (existing.data.length > 0) {
+                const sub         = existing.data[0];
+                const currentItem = sub.items && sub.items.data && sub.items.data[0];
+                const flowReturnUrl = `${returnBase}?page=ai-content-bridge&upgrade=success&plan=${planKey}`;
                 try {
-                    const portalSession = await stripe.billingPortal.sessions.create({
+                    const portalParams = {
                         customer:   stripeCustomerId,
-                        return_url: `${returnBase}?page=ai-content-bridge`,
-                    });
+                        return_url: flowReturnUrl,
+                    };
+                    if (currentItem) {
+                        portalParams.flow_data = {
+                            type: 'subscription_update_confirm',
+                            subscription_update_confirm: {
+                                subscription: sub.id,
+                                items: [{ id: currentItem.id, price: priceId, quantity: 1 }],
+                            },
+                            after_completion: {
+                                type: 'redirect',
+                                redirect: { return_url: flowReturnUrl },
+                            },
+                        };
+                    }
+                    const portalSession = await stripe.billingPortal.sessions.create(portalParams);
+                    console.log(`[checkout] Plan-change portal: license=${license_key} | ${planKey} (${billingInterval}) | deep_link=${!!currentItem}`);
                     return res.json({ success: true, checkout_url: portalSession.url, managed: true });
                 } catch (portalErr) {
                     console.error('[checkout] Billing portal error:', portalErr.message);
                     return res.status(409).json({
-                        error: `You already have an active subscription, but the Stripe billing portal isn't available: ${portalErr.message}. In test mode, enable it at Stripe → Settings → Billing → Customer portal.`,
+                        error: `You already have an active subscription, but the Stripe billing portal isn't available: ${portalErr.message}. In test mode, enable it (and turn on plan switching) at Stripe → Settings → Billing → Customer portal.`,
                     });
                 }
             }
