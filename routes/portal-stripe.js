@@ -128,12 +128,32 @@ router.post('/checkout', requireAuth, async (req, res) => {
             limit:    1,
           });
           if (subs.data.length > 0) {
-            // Already subscribed — send to billing portal to change plan
-            const portalSession = await stripe.billingPortal.sessions.create({
+            // Already subscribed — deep-link the billing portal straight to a
+            // "confirm switch to <plan>" screen for the plan the user clicked, then
+            // redirect back to the portal. Falls back to the generic portal if the
+            // current item can't be resolved. (Requires plan switching enabled in
+            // the Stripe Customer Portal.)
+            const sub         = subs.data[0];
+            const currentItem = sub.items && sub.items.data && sub.items.data[0];
+            const portalParams = {
               customer:   customerId,
-              return_url: cancelUrl,
-            });
-            console.log(`[portal/checkout] Existing sub — redirecting to portal for ${req.user.email}`);
+              return_url: successUrl,
+            };
+            if (currentItem) {
+              portalParams.flow_data = {
+                type: 'subscription_update_confirm',
+                subscription_update_confirm: {
+                  subscription: sub.id,
+                  items: [{ id: currentItem.id, price: priceId, quantity: 1 }],
+                },
+                after_completion: {
+                  type: 'redirect',
+                  redirect: { return_url: successUrl },
+                },
+              };
+            }
+            const portalSession = await stripe.billingPortal.sessions.create(portalParams);
+            console.log(`[portal/checkout] Existing sub — plan-change portal for ${req.user.email} → ${plan} (${billingInterval}), deep_link=${!!currentItem}`);
             return res.json({ success: true, url: portalSession.url });
           }
         } catch (subErr) {
