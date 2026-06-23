@@ -120,49 +120,68 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Existing active subscription → don't create a second one. Deep-link the
-        // billing portal straight to a "confirm switch to <plan>" screen for the
-        // exact plan the user clicked, then redirect back to the plugin on
-        // completion. Falls back to the generic portal if the current item can't be
-        // resolved. (Requires plan switching enabled in the Stripe Customer Portal.)
+        // Look up the customer's live subscription (any status that still
+        // represents a real subscription — not just 'active').
+        let liveSub = null;
         try {
-            const existing = await stripe.subscriptions.list({ customer: stripeCustomerId, status: 'active', limit: 1 });
-            if (existing.data.length > 0) {
-                const sub         = existing.data[0];
-                const currentItem = sub.items && sub.items.data && sub.items.data[0];
-                const flowReturnUrl = `${returnBase}?page=ai-content-bridge&upgrade=success&plan=${planKey}`;
+            const existing = await stripe.subscriptions.list({ customer: stripeCustomerId, status: 'all', limit: 10 });
+            liveSub = existing.data.find(s =>
+                ['active', 'trialing', 'past_due', 'unpaid', 'paused'].includes(s.status)
+            ) || null;
+        } catch (listErr) {
+            // We have a Stripe customer but can't read their subscription — do NOT
+            // silently create a second subscription. Surface it instead.
+            console.error('[checkout] subscriptions.list error:', listErr.message);
+            return res.status(502).json({
+                error: `Couldn't read your current subscription from Stripe (${listErr.message}). Please try again in a moment.`,
+            });
+        }
+
+        // Already subscribed → CHANGE the existing subscription, never create a
+        // second one. Deep-link to a "confirm switch to <plan>" screen for the plan
+        // clicked; fall back to the generic billing portal if the deep link is
+        // unavailable. (Requires plan switching enabled in the Stripe Customer Portal.)
+        if (liveSub) {
+            const currentItem   = liveSub.items && liveSub.items.data && liveSub.items.data[0];
+            const flowReturnUrl = `${returnBase}?page=ai-content-bridge&upgrade=success&plan=${planKey}`;
+
+            if (currentItem) {
                 try {
-                    const portalParams = {
+                    const portalSession = await stripe.billingPortal.sessions.create({
                         customer:   stripeCustomerId,
                         return_url: flowReturnUrl,
-                    };
-                    if (currentItem) {
-                        portalParams.flow_data = {
+                        flow_data: {
                             type: 'subscription_update_confirm',
                             subscription_update_confirm: {
-                                subscription: sub.id,
+                                subscription: liveSub.id,
                                 items: [{ id: currentItem.id, price: priceId, quantity: 1 }],
                             },
-                            after_completion: {
-                                type: 'redirect',
-                                redirect: { return_url: flowReturnUrl },
-                            },
-                        };
-                    }
-                    const portalSession = await stripe.billingPortal.sessions.create(portalParams);
-                    console.log(`[checkout] Plan-change portal: license=${license_key} | ${planKey} (${billingInterval}) | deep_link=${!!currentItem}`);
-                    return res.json({ success: true, checkout_url: portalSession.url, managed: true });
-                } catch (portalErr) {
-                    console.error('[checkout] Billing portal error:', portalErr.message);
-                    return res.status(409).json({
-                        error: `You already have an active subscription, but the Stripe billing portal isn't available: ${portalErr.message}. In test mode, enable it (and turn on plan switching) at Stripe → Settings → Billing → Customer portal.`,
+                            after_completion: { type: 'redirect', redirect: { return_url: flowReturnUrl } },
+                        },
                     });
+                    console.log(`[checkout] Plan change (deep-link): license=${license_key} | ${planKey} (${billingInterval})`);
+                    return res.json({ success: true, checkout_url: portalSession.url, managed: true });
+                } catch (flowErr) {
+                    console.warn(`[checkout] Deep-link unavailable (${flowErr.message}) — falling back to generic portal`);
                 }
             }
-        } catch (listErr) {
-            console.error('[checkout] subscriptions.list error:', listErr.message);
-            // Non-fatal — fall through and attempt to create the checkout session.
+
+            // Fallback: generic billing portal (still lets them change plan; no double-charge).
+            try {
+                const portalSession = await stripe.billingPortal.sessions.create({
+                    customer:   stripeCustomerId,
+                    return_url: `${returnBase}?page=ai-content-bridge`,
+                });
+                console.log(`[checkout] Plan change (generic portal): license=${license_key}`);
+                return res.json({ success: true, checkout_url: portalSession.url, managed: true });
+            } catch (portalErr) {
+                console.error('[checkout] Billing portal error:', portalErr.message);
+                return res.status(409).json({
+                    error: `You already have an active subscription, but the Stripe billing portal isn't available: ${portalErr.message}. In test mode, enable it (and turn on plan switching) at Stripe → Settings → Billing → Customer portal.`,
+                });
+            }
         }
+        // No live subscription → genuinely a new subscriber: fall through to checkout.
 
         try {
             const session = await stripe.checkout.sessions.create({
