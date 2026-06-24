@@ -77,20 +77,9 @@ router.post('/', async (req, res) => {
 
       // ── Subscription events ──
       case 'customer.subscription.created':
-      case 'customer.subscription.updated': {
-        // TEMPORARY PROBE — confirms where Stripe puts the billing-period fields
-        // on this account's API version, so the upgrade dedupe key can stop
-        // resolving to `:undefined`. Remove once the dedupe-key fix is in.
-        const _probeSub = event.data.object;
-        console.log('[period-probe]',
-          'root=', _probeSub.current_period_start,
-          'item=', _probeSub.items && _probeSub.items.data && _probeSub.items.data[0]
-            ? _probeSub.items.data[0].current_period_start
-            : '(no item)',
-          'api_version=', event.api_version);
+      case 'customer.subscription.updated':
         await handleSubscriptionUpdate(event.data.object);
         break;
-      }
 
       case 'customer.subscription.deleted':
         await handleSubscriptionCancelled(event.data.object);
@@ -329,7 +318,19 @@ async function handleSubscriptionUpdate(subscription) {
     oldTier && TIER_RANK[oldTier] >= TIER_RANK.starter &&
     typeof TIER_RANK[tier] === 'number' && TIER_RANK[tier] > TIER_RANK[oldTier]
   ) {
-    const dedupeKey = `${subscription.id}:${priceId}:${subscription.current_period_start}`;
+    // Period stamp makes the key unique per billing period, so a legitimate
+    // re-upgrade in a LATER period grants again while same-period churn / webhook
+    // retries don't. As of the 2026-04-22.dahlia API version the period fields
+    // live on the subscription ITEM, not the root (root is now undefined) — read
+    // the item first, fall back to the root for older versions, then to a literal
+    // so the key is never the string 'undefined'.
+    const periodStart =
+      (subscription.items && subscription.items.data && subscription.items.data[0]
+        ? subscription.items.data[0].current_period_start
+        : undefined)
+      ?? subscription.current_period_start
+      ?? 'na';
+    const dedupeKey = `${subscription.id}:${priceId}:${periodStart}`;
     try {
       await grantUpgradeCredits({ licenseId: upgradeLicenseId, tier, dedupeKey });
       console.log(`[webhook] Upgrade detected ${oldTier} → ${tier} (license_id=${upgradeLicenseId}) — credits topped up`);
