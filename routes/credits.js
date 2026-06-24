@@ -90,7 +90,8 @@ router.get('/', async (req, res) => {
 
     console.log('=== CREDITS CALCULATION ===');
     console.log('Tier:', tier);
-    console.log('Monthly limit:', monthly_credit_limit);
+    console.log('Monthly limit (effective):', effectiveLimit,
+      `(tier default ${tierDefault}; raw column ${monthly_credit_limit})`);
     console.log('Active batches:', active_batches);
     console.log('Total credits remaining:', finalCredits);
     console.log('Next expiry date:', next_expiry_date || 'None');

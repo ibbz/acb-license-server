@@ -97,6 +97,17 @@ router.post('/', async (req, res) => {
     const creditsRemaining = parseInt(creditsResult.rows[0].remaining) || 0;
     const canGenerate = creditsRemaining > 0;
 
+    // Monthly allowance is derived from the tier (the source of truth). The stored
+    // monthly_credit_limit column is NOT NULL DEFAULT 5 and isn't updated on
+    // upgrade, so honour it ONLY when deliberately raised above the tier default
+    // (a custom plan) — otherwise paid licences would report the free/5 value.
+    // Mirrors the logic in routes/credits.js so both endpoints agree.
+    const TIER_LIMITS = { free: 5, starter: 30, pro: 100, agency: 300 };
+    const tierDefault = TIER_LIMITS[license.tier] || 5;
+    const effectiveLimit = (license.monthly_credit_limit != null && license.monthly_credit_limit > tierDefault)
+      ? license.monthly_credit_limit
+      : tierDefault;
+
     // Log validation attempt
     await pool.query(`
       INSERT INTO usage_logs (license_key_id, domain, post_title, created_at)
@@ -109,7 +120,7 @@ router.post('/', async (req, res) => {
       canGenerate: canGenerate,
       creditsRemaining: creditsRemaining,
       postsUsedThisMonth: license.posts_used_this_month,
-      postsLimit: license.monthly_credit_limit,
+      postsLimit: effectiveLimit,
       email: license.email,
       domain: domain
     });
