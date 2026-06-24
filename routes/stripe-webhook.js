@@ -77,9 +77,20 @@ router.post('/', async (req, res) => {
 
       // ── Subscription events ──
       case 'customer.subscription.created':
-      case 'customer.subscription.updated':
+      case 'customer.subscription.updated': {
+        // TEMPORARY PROBE — confirms where Stripe puts the billing-period fields
+        // on this account's API version, so the upgrade dedupe key can stop
+        // resolving to `:undefined`. Remove once the dedupe-key fix is in.
+        const _probeSub = event.data.object;
+        console.log('[period-probe]',
+          'root=', _probeSub.current_period_start,
+          'item=', _probeSub.items && _probeSub.items.data && _probeSub.items.data[0]
+            ? _probeSub.items.data[0].current_period_start
+            : '(no item)',
+          'api_version=', event.api_version);
         await handleSubscriptionUpdate(event.data.object);
         break;
+      }
 
       case 'customer.subscription.deleted':
         await handleSubscriptionCancelled(event.data.object);
