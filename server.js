@@ -33,6 +33,12 @@ pool.on('error', (err) => {
   console.error('❌ Database connection error:', err);
 });
 
+console.log('[boot] resolved prices:',
+  'starter=', process.env.STRIPE_STARTER_PRICE_ID,
+  'pro=', process.env.STRIPE_PRO_PRICE_ID,
+  'agency=', process.env.STRIPE_AGENCY_PRICE_ID);
+
+
 // ─── CORS allowlist ───────────────────────────────────────────────────────────
 // Locked to known origins instead of '*'. Override via the CORS_ALLOWED_ORIGINS
 // env var (comma-separated) without a code change.
