@@ -650,9 +650,11 @@ router.post('/', async (req, res) => {
         const rawArticleText = await contentPromise;
         console.log(`[generate] Article generated (${rawArticleText.length} chars)`);
 
-        // For quiz content types, extract structured quiz data from Claude's response
+        // For quiz content types AND training modules, extract structured quiz data.
+        // Training modules include a ---QUIZ_DATA_START--- block for the knowledge
+        // check, which the PHP publish handler will use to auto-create an attached quiz.
         let quizData = null;
-        if (activeContentType === 'quiz_assessment') {
+        if (activeContentType === 'quiz_assessment' || activeContentType === 'training_module') {
             const parsed = parseQuizData(rawArticleText);
             quizData    = parsed.quizData;
             articleText = parsed.cleanContent;

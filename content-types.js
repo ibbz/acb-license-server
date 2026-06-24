@@ -800,9 +800,37 @@ ${seoBlock}`;
 3. Main content divided into 3-5 clear sections, each with its own H2
 4. Each section: concept explanation, example, practical application
 5. ## Key Takeaways — 5-7 bullet point summary
-6. ## Knowledge Check — ${m.num_questions || '5'} questions to test understanding
+6. ## Knowledge Check — ${m.num_questions || '5'} multiple choice questions to test understanding
+   Write each question in human-readable format:
+   Q1. [Question]
+   A) [Option]  B) [Option]  C) [Option]  D) [Option]
+   Correct: [letter] — [one sentence explanation]
 7. ## Further Reading / Resources — placeholder list
 8. Tone: clear, engaging, and educational — avoid jargon unless the audience level warrants it
+
+---CRITICAL: After the human-readable content above, append this EXACT structured block so the knowledge check can be auto-built as a quiz in the LMS---
+
+---QUIZ_DATA_START---
+{
+  "quiz_intro": "[1-2 sentence intro for the knowledge check]",
+  "question_type": "multiple_choice",
+  "questions": [
+    {
+      "text": "[question text]",
+      "type": "multiple_choice",
+      "answers": [
+        { "text": "[answer]", "correct": true },
+        { "text": "[answer]", "correct": false },
+        { "text": "[answer]", "correct": false },
+        { "text": "[answer]", "correct": false }
+      ],
+      "explanation": "[why the correct answer is correct]"
+    }
+  ]
+}
+---QUIZ_DATA_END---
+
+JSON rules: exactly ${m.num_questions || '5'} questions | exactly 4 answers per question | exactly 1 correct:true | valid JSON, escape inner quotes
 ${formattingRules}
 ${seoBlock}`;
 
