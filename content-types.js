@@ -801,7 +801,7 @@ ${seoBlock}`;
 4. Each section: concept explanation, example, practical application
 5. ## Key Takeaways — 5-7 bullet point summary
 6. ## Knowledge Check — ${m.num_questions || '5'} multiple choice questions to test understanding
-   Write each question in human-readable format:
+   Write each in human-readable format:
    Q1. [Question]
    A) [Option]  B) [Option]  C) [Option]  D) [Option]
    Correct: [letter] — [one sentence explanation]
@@ -819,8 +819,8 @@ ${seoBlock}`;
       "text": "[question text]",
       "type": "multiple_choice",
       "answers": [
-        { "text": "[answer]", "correct": true },
         { "text": "[answer]", "correct": false },
+        { "text": "[answer]", "correct": true },
         { "text": "[answer]", "correct": false },
         { "text": "[answer]", "correct": false }
       ],
@@ -830,7 +830,7 @@ ${seoBlock}`;
 }
 ---QUIZ_DATA_END---
 
-JSON rules: exactly ${m.num_questions || '5'} questions | exactly 4 answers per question | exactly 1 correct:true | valid JSON, escape inner quotes
+JSON rules: exactly ${m.num_questions || '5'} questions | exactly 4 answers per question | exactly 1 correct:true | CRITICAL: vary which position holds the correct answer across questions — distribute correct answers roughly evenly across A/B/C/D, never default to the first slot (a quiz where every correct answer is option A is unusable) | valid JSON, escape inner quotes
 ${formattingRules}
 ${seoBlock}`;
 
@@ -903,9 +903,9 @@ ${seoBlock}`;
       "text": "[question text]",
       "type": "${m.quiz_type === 'True / False' ? 'true_false' : m.quiz_type === 'Open Questions' ? 'open' : 'multiple_choice'}",
       "answers": [
+        { "text": "[answer]", "correct": false },
+        { "text": "[answer]", "correct": false },
         { "text": "[answer]", "correct": true },
-        { "text": "[answer]", "correct": false },
-        { "text": "[answer]", "correct": false },
         { "text": "[answer]", "correct": false }
       ],
       "explanation": "[why the correct answer is correct]"
@@ -914,7 +914,7 @@ ${seoBlock}`;
 }
 ---QUIZ_DATA_END---
 
-JSON rules: exactly ${m.num_questions || '10'} questions | True/False: 2 answers only, type=true_false | Open: no answers array, add model_answer field, type=open | Multiple Choice: exactly 4 answers, exactly 1 correct:true | Valid JSON, escape inner quotes
+JSON rules: exactly ${m.num_questions || '10'} questions | True/False: 2 answers only, type=true_false | Open: no answers array, add model_answer field, type=open | Multiple Choice: exactly 4 answers, exactly 1 correct:true | CRITICAL: vary which position holds the correct answer across questions — distribute correct answers roughly evenly across all positions, never default to the first slot (a quiz where every correct answer is option A is unusable) | Valid JSON, escape inner quotes
 ${formattingRules}
 ${seoBlock}`;
 
