@@ -41,7 +41,7 @@ const SERP_GROUNDING_TYPES = new Set([
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Deduct credits from the oldest non-expired batch.
+ * Deduct credits from the soonest-to-expire non-expired batch.
  * Returns { success, batch_id, credits_deducted } or { success: false, error }
  */
 async function deductCredits(client, licenseKey, credits, domain, postTitle, contentType, styleProfileName) {
@@ -53,7 +53,14 @@ async function deductCredits(client, licenseKey, credits, domain, postTitle, con
         )
         AND expiry_date > CURRENT_DATE
         AND credits_remaining >= $2
-        ORDER BY issued_date ASC
+        -- Spend the soonest-to-expire batch first. Monthly subscription credits
+        -- expire ~35 days after they are granted; bundle/top-up credits never
+        -- expire (expiry_date 2099-12-31). Ordering by expiry_date ASC means an
+        -- expiring monthly allowance is always consumed before a never-expiring
+        -- bundle, so a customer's metered subscription credits can't silently
+        -- lapse while their bundle is burned first. issued_date breaks ties
+        -- (e.g. two same-expiry monthly/upgrade batches, or multiple bundles).
+        ORDER BY expiry_date ASC, issued_date ASC
         LIMIT 1
         FOR UPDATE
     `, [licenseKey, credits]);

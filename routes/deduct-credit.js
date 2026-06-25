@@ -36,7 +36,12 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     console.log('Step 2: Transaction started');
 
-    // Find oldest non-expired batch with enough credits
+    // Find the soonest-to-expire non-expired batch with enough credits.
+    // Monthly subscription credits expire ~35 days after grant; bundle/top-up
+    // credits never expire (expiry_date 2099-12-31). Ordering by expiry_date
+    // ASC spends the expiring monthly allowance before a never-expiring bundle,
+    // so a customer's metered credits can't lapse while the bundle burns first.
+    // issued_date breaks ties. (Mirrors deductCredits() in generate.js.)
     const batchResult = await client.query(`
       SELECT id, credits_remaining, expiry_date
       FROM credit_batches
@@ -45,7 +50,7 @@ router.post('/', async (req, res) => {
       )
       AND expiry_date > CURRENT_DATE
       AND credits_remaining >= $2
-      ORDER BY issued_date ASC
+      ORDER BY expiry_date ASC, issued_date ASC
       LIMIT 1
       FOR UPDATE
     `, [license_key, creditsToDeduct]);
