@@ -11,6 +11,7 @@
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
+const creditsCache = require('../lib/credits-cache');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -82,6 +83,7 @@ router.post('/', async (req, res) => {
             VALUES ($1, 'refund', $2, $3, 'refund', NOW())
         `, [licenseKeyId, reason, -creditsToRefund]);
 
+        creditsCache.invalidate(license_key); // balance restored — next /credits poll reads fresh
         return res.json({
             success:          true,
             credits_refunded: creditsToRefund,

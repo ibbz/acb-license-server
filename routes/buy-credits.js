@@ -9,6 +9,7 @@
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
+const creditsCache = require('../lib/credits-cache');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -69,6 +70,7 @@ router.post('/', async (req, res) => {
         );
 
         await client.query('COMMIT');
+        creditsCache.invalidate(license_key); // bundle added — next /credits poll reads fresh
 
         const balanceResult = await client.query(
             `SELECT COALESCE(SUM(credits_remaining), 0) AS total FROM credit_batches WHERE license_key_id = $1 AND expiry_date > CURRENT_DATE`,

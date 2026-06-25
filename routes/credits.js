@@ -15,20 +15,27 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Short-lived read cache + invalidation. See lib/credits-cache.js — a bounded
+// TTL is the safety net and the write paths call invalidate() for instant
+// freshness where a user is watching the balance.
+const creditsCache = require('../lib/credits-cache');
+
 router.get('/', async (req, res) => {
   const licenseKey = req.query.license_key || req.body?.license_key;
 
-  console.log('=== CREDITS REQUEST RECEIVED ===');
-  console.log('License Key:', licenseKey ? licenseKey.substring(0, 8) + '...' : 'MISSING');
-  console.log('Request method:', req.method);
-  console.log('Query params:', JSON.stringify(req.query));
-
   if (!licenseKey) {
-    console.log('ERROR: license_key is required');
-    return res.status(400).json({ 
-      success: false, 
-      error: 'license_key query parameter is required' 
+    return res.status(400).json({
+      success: false,
+      error: 'license_key query parameter is required'
     });
+  }
+
+  // Cache hit: serve the recent balance and skip the drip check + both queries.
+  // Silent by design — a served-from-cache poll is exactly the noise we want
+  // gone from the logs. Only cache-miss reads below log a single line.
+  const cached = creditsCache.get(licenseKey);
+  if (cached) {
+    return res.json(cached);
   }
 
   try {
@@ -42,8 +49,6 @@ router.get('/', async (req, res) => {
       console.error('[credits] annual top-up check failed (non-fatal):', dripErr.message);
     }
 
-    console.log('Fetching credit batches for license key...');
-
     // Get total remaining credits from non-expired batches
     const creditsResult = await pool.query(`
       SELECT 
@@ -56,8 +61,6 @@ router.get('/', async (req, res) => {
       )
       AND expiry_date > CURRENT_DATE
     `, [licenseKey]);
-
-    console.log('Credit batches query result:', creditsResult.rows[0]);
 
     // Get tier info
     const tierResult = await pool.query(`
@@ -84,17 +87,10 @@ router.get('/', async (req, res) => {
     const effectiveLimit = (monthly_credit_limit != null && monthly_credit_limit > tierDefault)
       ? monthly_credit_limit
       : tierDefault;
+
     const { credits_remaining, next_expiry_date, active_batches } = creditsResult.rows[0];
 
     const finalCredits = parseInt(credits_remaining) || 0;
-
-    console.log('=== CREDITS CALCULATION ===');
-    console.log('Tier:', tier);
-    console.log('Monthly limit (effective):', effectiveLimit,
-      `(tier default ${tierDefault}; raw column ${monthly_credit_limit})`);
-    console.log('Active batches:', active_batches);
-    console.log('Total credits remaining:', finalCredits);
-    console.log('Next expiry date:', next_expiry_date || 'None');
 
     const response = {
       success: true,
@@ -105,8 +101,11 @@ router.get('/', async (req, res) => {
       active_batches: parseInt(active_batches) || 0
     };
 
-    console.log('=== CREDITS RESPONSE ===');
-    console.log('Sending response:', JSON.stringify(response));
+    // Cache the fresh result so the next burst of polls (and the second tab)
+    // are served from memory instead of re-querying. One concise log line per
+    // cache-miss read replaces the old ~14-line block.
+    creditsCache.set(licenseKey, response);
+    console.log(`[credits] ${licenseKey.substring(0, 8)}\u2026 tier=${tier} remaining=${finalCredits} limit=${effectiveLimit} batches=${response.active_batches} (cache miss)`);
 
     res.json(response);
 

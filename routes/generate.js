@@ -25,6 +25,7 @@ const { Pool } = require('pg');
 const { CONTENT_TYPES, canAccessContentType, buildPrompt } = require('../content-types');
 const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
 const serp = require('../lib/serp');
+const creditsCache = require('../lib/credits-cache');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -607,6 +608,7 @@ router.post('/', async (req, res) => {
 
         batchId = deduction.batch_id;
         await client.query('COMMIT');
+        creditsCache.invalidate(license_key); // balance changed — next /credits poll reads fresh
         console.log(`[generate] Deducted ${credits} credits from batch ${batchId}`);
     } catch (err) {
         await client.query('ROLLBACK');
@@ -764,6 +766,7 @@ router.post('/', async (req, res) => {
         // Refund credits on failure
         if (batchId) {
             await refundCredits(batchId, credits);
+            creditsCache.invalidate(license_key); // balance restored — drop the stale cached value
         }
 
         // Notify WordPress of the failure so the entry shows 'failed' status
