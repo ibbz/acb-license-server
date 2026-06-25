@@ -650,11 +650,9 @@ router.post('/', async (req, res) => {
         const rawArticleText = await contentPromise;
         console.log(`[generate] Article generated (${rawArticleText.length} chars)`);
 
-        // For quiz content types AND training modules, extract structured quiz data.
-        // Training modules include a ---QUIZ_DATA_START--- block for the knowledge
-        // check, which the PHP publish handler will use to auto-create an attached quiz.
+        // For quiz content types, extract structured quiz data from Claude's response
         let quizData = null;
-        if (activeContentType === 'quiz_assessment' || activeContentType === 'training_module') {
+        if (activeContentType === 'quiz_assessment') {
             const parsed = parseQuizData(rawArticleText);
             quizData    = parsed.quizData;
             articleText = parsed.cleanContent;
@@ -708,6 +706,12 @@ router.post('/', async (req, res) => {
             post_id:            post_id    || null,
             post_type:          post_type  || 'post',
             acf_field_key:      acf_field_key || '',
+            // Content type — REQUIRED by the WordPress publish handler to route to
+            // the correct integration (MailPoet/TNP newsletters, TEC events, the
+            // training-module knowledge-check auto-quiz). Without it those gates
+            // all fail silently and the content lands as a plain post.
+            content_type:       activeContentType,
+            content_type_meta:  content_type_meta || {},
             ai_model:           'claude-sonnet-4-5',
             image_model:        'gpt-image-1.5',
             credits_used:       credits,
