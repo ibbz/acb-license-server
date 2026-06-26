@@ -26,6 +26,7 @@ const { CONTENT_TYPES, canAccessContentType, buildPrompt } = require('../content
 const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
 const serp = require('../lib/serp');
 const creditsCache = require('../lib/credits-cache');
+const creditLedger = require('../lib/credit-ledger');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -42,42 +43,17 @@ const SERP_GROUNDING_TYPES = new Set([
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Deduct credits from the soonest-to-expire non-expired batch.
- * Returns { success, batch_id, credits_deducted } or { success: false, error }
+ * Deduct credits across batches in expiry order (soonest-to-expire first), via the
+ * shared ledger. Spending can SPAN batches so a split balance (e.g. 5 monthly + 5
+ * bundle) covers a 2–3 credit post — the gate already sums across batches, so the
+ * deduction must too. Then logs the usage row.
+ * Returns { success, allocations:[{batch_id,amount}], credits_deducted } or { success:false, error }.
  */
 async function deductCredits(client, licenseKey, credits, domain, postTitle, contentType, styleProfileName) {
-    const batchResult = await client.query(`
-        SELECT id, credits_remaining
-        FROM credit_batches
-        WHERE license_key_id = (
-            SELECT id FROM license_keys WHERE license_key = $1 AND status = 'active'
-        )
-        AND expiry_date > CURRENT_DATE
-        AND credits_remaining >= $2
-        -- Spend the soonest-to-expire batch first. Monthly subscription credits
-        -- expire ~35 days after they are granted; bundle/top-up credits never
-        -- expire (expiry_date 2099-12-31). Ordering by expiry_date ASC means an
-        -- expiring monthly allowance is always consumed before a never-expiring
-        -- bundle, so a customer's metered subscription credits can't silently
-        -- lapse while their bundle is burned first. issued_date breaks ties
-        -- (e.g. two same-expiry monthly/upgrade batches, or multiple bundles).
-        ORDER BY expiry_date ASC, issued_date ASC
-        LIMIT 1
-        FOR UPDATE
-    `, [licenseKey, credits]);
-
-    if (batchResult.rows.length === 0) {
-        return { success: false, error: 'Insufficient credits' };
+    const ded = await creditLedger.deductSpanning(client, licenseKey, credits);
+    if (!ded.success) {
+        return { success: false, error: ded.error || 'Insufficient credits' };
     }
-
-    const batch = batchResult.rows[0];
-    const newRemaining = batch.credits_remaining - credits;
-
-    await client.query(`
-        UPDATE credit_batches
-        SET credits_remaining = $1
-        WHERE id = $2
-    `, [newRemaining, batch.id]);
 
     await client.query(`
         INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, style_profile_used, created_at)
@@ -87,23 +63,7 @@ async function deductCredits(client, licenseKey, credits, domain, postTitle, con
         )
     `, [licenseKey, domain || 'unknown', postTitle || 'Untitled', credits, contentType || 'blog_post', styleProfileName || null]);
 
-    return { success: true, batch_id: batch.id, credits_deducted: credits };
-}
-
-/**
- * Refund credits back to the batch they were taken from.
- */
-async function refundCredits(batchId, credits) {
-    try {
-        await pool.query(`
-            UPDATE credit_batches
-            SET credits_remaining = credits_remaining + $1
-            WHERE id = $2
-        `, [credits, batchId]);
-        console.log(`[generate] Refunded ${credits} credits to batch ${batchId}`);
-    } catch (err) {
-        console.error('[generate] Credit refund failed:', err.message);
-    }
+    return { success: true, allocations: ded.allocations, credits_deducted: credits };
 }
 
 /**
@@ -595,7 +555,7 @@ router.post('/', async (req, res) => {
 
     // ── Step 2: deduct credits atomically ─────────────────────────────────
     const client = await pool.connect();
-    let batchId = null;
+    let allocations = null;
 
     try {
         await client.query('BEGIN');
@@ -606,10 +566,10 @@ router.post('/', async (req, res) => {
             return res.status(402).json({ success: false, error: deduction.error });
         }
 
-        batchId = deduction.batch_id;
+        allocations = deduction.allocations;
         await client.query('COMMIT');
         creditsCache.invalidate(license_key); // balance changed — next /credits poll reads fresh
-        console.log(`[generate] Deducted ${credits} credits from batch ${batchId}`);
+        console.log(`[generate] Deducted ${credits} credits across ${allocations.length} batch(es)`);
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('[generate] Credit deduction failed:', err.message);
@@ -764,8 +724,8 @@ router.post('/', async (req, res) => {
         console.error(`[generate] Stack:`, err.stack);
 
         // Refund credits on failure
-        if (batchId) {
-            await refundCredits(batchId, credits);
+        if (allocations) {
+            await creditLedger.refundSpanning(pool, allocations);
             creditsCache.invalidate(license_key); // balance restored — drop the stale cached value
         }
 

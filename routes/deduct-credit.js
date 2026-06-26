@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const creditsCache = require('../lib/credits-cache');
+const creditLedger = require('../lib/credit-ledger');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -37,46 +38,20 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     console.log('Step 2: Transaction started');
 
-    // Find the soonest-to-expire non-expired batch with enough credits.
-    // Monthly subscription credits expire ~35 days after grant; bundle/top-up
-    // credits never expire (expiry_date 2099-12-31). Ordering by expiry_date
-    // ASC spends the expiring monthly allowance before a never-expiring bundle,
-    // so a customer's metered credits can't lapse while the bundle burns first.
-    // issued_date breaks ties. (Mirrors deductCredits() in generate.js.)
-    const batchResult = await client.query(`
-      SELECT id, credits_remaining, expiry_date
-      FROM credit_batches
-      WHERE license_key_id = (
-        SELECT id FROM license_keys WHERE license_key = $1 AND status = 'active'
-      )
-      AND expiry_date > CURRENT_DATE
-      AND credits_remaining >= $2
-      ORDER BY expiry_date ASC, issued_date ASC
-      LIMIT 1
-      FOR UPDATE
-    `, [license_key, creditsToDeduct]);
+    // Deduct across batches in expiry order (soonest-to-expire first) via the
+    // shared ledger — spending spans batches so a split balance (e.g. 5 monthly +
+    // 5 bundle) covers the charge instead of failing despite enough total credits.
+    const ded = await creditLedger.deductSpanning(client, license_key, creditsToDeduct);
 
-    console.log('Step 3: Batch query completed. Rows found:', batchResult.rows.length);
+    console.log('Step 3: Deduction attempted. Spanned batches:', ded.success ? ded.allocations.length : 0);
 
-    if (batchResult.rows.length === 0) {
+    if (!ded.success) {
       await client.query('ROLLBACK');
-      console.log('No suitable batch found');
+      console.log('Insufficient credits across batches');
       return res.json({ success: false, error: 'No credits available' });
     }
 
-    const batch = batchResult.rows[0];
-    const newRemaining = batch.credits_remaining - creditsToDeduct;
-
-    console.log('Step 4: Selected batch ID', batch.id, 'with', batch.credits_remaining, 'credits remaining');
-
-    // Deduct credits (NO updated_at column)
-    await client.query(`
-      UPDATE credit_batches 
-      SET credits_remaining = $1
-      WHERE id = $2
-    `, [newRemaining, batch.id]);
-
-    console.log('Step 5: Batch updated successfully');
+    console.log('Step 4: Deducted across batch(es)', ded.allocations.map(a => `${a.batch_id}:${a.amount}`).join(', '));
 
     // Log usage
     await client.query(`
@@ -87,17 +62,17 @@ router.post('/', async (req, res) => {
       )
     `, [license_key, domain || 'unknown', post_title || 'Untitled Post', creditsToDeduct]);
 
-    console.log('Step 6: Usage log created');
+    console.log('Step 5: Usage log created');
 
     await client.query('COMMIT');
-    console.log('Step 7: Transaction committed');
+    console.log('Step 6: Transaction committed');
     creditsCache.invalidate(license_key); // balance changed — next /credits poll reads fresh
 
-    console.log('=== DEDUCT CREDIT SUCCESS ===', creditsToDeduct, 'credits from batch', batch.id);
+    console.log('=== DEDUCT CREDIT SUCCESS ===', creditsToDeduct, 'credits across', ded.allocations.length, 'batch(es)');
 
-    res.json({ 
-      success: true, 
-      credits_deducted: creditsToDeduct 
+    res.json({
+      success: true,
+      credits_deducted: creditsToDeduct
     });
 
   } catch (error) {
