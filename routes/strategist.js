@@ -480,7 +480,10 @@ router.post('/preview', async (req, res) => {
 
     const timespan = clampTimespan(params.timespan_months, tier);
     const dates = expandCadence(params.cadence, timespan, params.start_date);
-    const palette = resolvePalette(tier, params.content_types);
+    // Always return the FULL tier palette for the picker. Narrowing by the user's
+    // selection is a plan-time concern and has no effect on the cost or post count,
+    // so it must not shrink the list of choices shown to them.
+    const palette = resolvePalette(tier, []);
     const cost = planCost(dates.length);
 
     const requested = parseInt(params.timespan_months, 10) || timespan;
