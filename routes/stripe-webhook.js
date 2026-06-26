@@ -18,7 +18,7 @@ const pool = new Pool({
 
 // Import bundle definitions so we stay in sync
 const { BUNDLES } = require('./create-checkout-session');
-const { tierFromPriceId, postsLimitForTier, normaliseInterval, TIER_RANK } = require('./plans');
+const { tierFromPriceId, postsLimitForTier, normaliseInterval, resolveBillingInterval, TIER_RANK } = require('./plans');
 const { grantSubscriptionCredits: grantSharedCredits, grantUpgradeCredits: grantUpgradeShared } = require('../lib/subscription-credits');
 
 // Thin wrapper so existing call sites stay unchanged — binds the shared grant
@@ -246,8 +246,23 @@ async function handleSubscriptionUpdate(subscription) {
   // annual subscription can never silently resolve to 'free'.
   const tier = tierFromPriceId(priceId);
   const postsLimit = postsLimitForTier(tier);
-  const priceInterval = normaliseInterval(priceObj.recurring && priceObj.recurring.interval);
+  // Resolve the billing interval robustly rather than trusting the raw price
+  // interval. resolveBillingInterval() reads the live price interval_count-aware
+  // (so a "month × 12" price still counts as annual) and falls back to the
+  // checkout-stamped subscription metadata only when the price has no recurring
+  // data. The price is the live truth of what the customer pays; metadata can go
+  // stale after a portal-initiated interval switch — hence price-primary.
+  const metaInterval  = subscription.metadata && subscription.metadata.interval;
+  const priceInterval = resolveBillingInterval(priceObj, metaInterval);
   const isAnnual = priceInterval === 'year';
+
+  // Observability: if the live price and the checkout-stamped metadata disagree,
+  // surface it (the price still wins). This makes a future misconfigured price
+  // visible in the logs instead of silently clobbering the annual drip clock —
+  // the exact failure mode that previously slipped through.
+  if (metaInterval && normaliseInterval(metaInterval) !== priceInterval) {
+    console.warn(`[webhook] interval disagreement for customer ${customerId}: price=${priceInterval} metadata=${normaliseInterval(metaInterval)} — using price`);
+  }
 
   // Capture the tier BEFORE we overwrite it, so a genuine mid-cycle upgrade can be
   // detected and credited below. (This handler also fires for non-tier changes —

@@ -37,6 +37,40 @@ function normaliseInterval(interval) {
   return 'month';
 }
 
+// Resolve the effective billing interval ('month' | 'year') for a subscription,
+// robustly, from the live Stripe price — with the checkout-stamped metadata as a
+// fallback only. This exists because two real-world quirks can each mis-set the
+// annual drip clock:
+//
+//   1. A price built as "every 12 months" (recurring.interval='month',
+//      interval_count=12) is functionally annual but reports interval='month'.
+//      Reading interval ALONE (the old `priceObj.recurring.interval`) would treat
+//      such a sub as monthly and clobber annual_term_end / next_credit_grant_at to
+//      NULL — month 1 grants, then it never drips. Reading interval_count-aware
+//      fixes that without depending on every price being shaped perfectly.
+//
+//   2. subscription.metadata.interval is stamped correctly at ACB checkout, but it
+//      can go STALE after a portal-initiated interval switch (the price changes,
+//      the old metadata does not). So the live price is the source of truth for
+//      what the customer actually pays; metadata is only the fallback for when the
+//      price object carries no usable recurring data.
+//
+// Returns 'month' or 'year'. Pure (no env / DB), so it is unit-testable in isolation.
+function resolveBillingInterval(priceObj, metadataInterval) {
+  const rec = priceObj && priceObj.recurring;
+  if (rec && rec.interval) {
+    const base  = String(rec.interval).toLowerCase();
+    const count = Number(rec.interval_count) || 1;
+    if (base === 'year') return 'year';
+    if (base === 'month' && count >= 12)  return 'year'; // "every 12 months" == annual
+    if (base === 'week'  && count >= 52)  return 'year';
+    if (base === 'day'   && count >= 365) return 'year';
+    return 'month';
+  }
+  // No usable price recurring data — fall back to the checkout-stamped metadata.
+  return normaliseInterval(metadataInterval);
+}
+
 // Resolve a Stripe price ID for a plan + interval. Returns null if not configured.
 function getPlanPriceId(plan, interval) {
   const tier = String(plan || '').toLowerCase();
@@ -66,6 +100,7 @@ module.exports = {
   CREDIT_ALLOWANCE,
   TIER_RANK,
   normaliseInterval,
+  resolveBillingInterval,
   getPlanPriceId,
   tierFromPriceId,
   postsLimitForTier,
