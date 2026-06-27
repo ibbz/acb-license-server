@@ -610,6 +610,13 @@ router.post('/', async (req, res) => {
             content_type, content_type_meta,
             approved_outline, serp_gl, serp_hl,
         });
+        // Attach a handler immediately. generateContent can reject *before* its first
+        // await (a missing config value, a synchronous throw). Because we await the
+        // best-effort image/YouTube steps below before awaiting contentPromise, such a
+        // fast rejection would otherwise be flagged as an unhandled rejection and crash
+        // the process (this whole pipeline runs after res.json, so nothing else catches
+        // it). The no-op handler defuses that; real handling still happens at the await.
+        contentPromise.catch(() => {});
 
         let ytResults = [], imgResult = null;
         try {
@@ -733,10 +740,16 @@ router.post('/', async (req, res) => {
         console.error(`[generate] Pipeline failed for "${title}":`, err.message);
         console.error(`[generate] Stack:`, err.stack);
 
-        // Refund credits on failure
+        // Refund credits on failure. This MUST NOT throw out of the catch — the
+        // pipeline runs after res.json(), so an escaping rejection here is unhandled
+        // and crashes the process, stranding the entry on 'generating'.
         if (allocations) {
-            await creditLedger.refundSpanning(pool, allocations);
-            creditsCache.invalidate(license_key); // balance restored — drop the stale cached value
+            try {
+                await creditLedger.refundSpanning(pool, allocations);
+                creditsCache.invalidate(license_key); // balance restored — drop the stale cached value
+            } catch (refundErr) {
+                console.error('[generate] Refund failed (non-fatal, manual review):', refundErr.message);
+            }
         }
 
         // Notify WordPress of the failure so the entry shows 'failed' status

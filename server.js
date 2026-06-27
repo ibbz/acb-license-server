@@ -33,6 +33,22 @@ pool.on('error', (err) => {
   console.error('❌ Database connection error:', err);
 });
 
+// ─── Process-level safety net ─────────────────────────────────────────────────
+// The generation pipeline runs fire-and-forget after responding to WordPress, so a
+// stray rejection in that async work has no caller to catch it. Without this, Node
+// (v15+) terminates the process — stranding the in-flight entry on 'generating' and
+// cutting the logs on restart. Log and keep serving instead; per-request handlers
+// still mark their own entry 'failed'.
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled promise rejection:', reason && reason.stack ? reason.stack : reason);
+});
+
+process.on('uncaughtException', (err) => {
+  // Last-resort net. An uncaught exception can leave state inconsistent, so treat
+  // this as a safety log, not a substitute for handling errors at their source.
+  console.error('❌ Uncaught exception:', err && err.stack ? err.stack : err);
+});
+
 
 // ─── CORS allowlist ───────────────────────────────────────────────────────────
 // Locked to known origins instead of '*'. Override via the CORS_ALLOWED_ORIGINS
@@ -158,7 +174,6 @@ app.use('/api/beta-feedback',           require('./routes/beta-feedback'));
 app.use('/api/cron',                    require('./routes/cron'));
 app.use('/api/plugin',                  require('./routes/plugin-updates'));
 app.use('/api/outline',                 require('./routes/outline'));
-app.use('/api/strategist', 				require('./routes/strategist'));
 app.use('/api/portal',                  require('./routes/portal-download'));
 app.use('/api/portal/support', 			require('./routes/portal-support-chat'));
 app.use('/api/admin',                   require('./routes/admin-releases'));

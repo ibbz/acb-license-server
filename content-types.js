@@ -355,6 +355,82 @@ function canAccessContentType(contentTypeId, userTier) {
 
 // ── Prompt builder ────────────────────────────────────────────────────────────
 
+/**
+ * Per-content-type length profiles — the single source of truth for how long
+ * each type should be. `target` is the centre, `min`/`max` the acceptable band.
+ *
+ *   • Flexible types (blog, guide, tutorial, reviews, courses) get wide bands —
+ *     depth genuinely adds value.
+ *   • Tight types (service/landing/about pages, products, listings) get narrow
+ *     bands — there is a right length and longer is just padding (and, for
+ *     landing pages, worse for conversion).
+ *   • Structural types (social, video script, quiz/assessment, SOPs, etc.) have
+ *     NO profile: their length follows their structure, so they get a generous
+ *     token budget only (see maxTokensFor) and no word band in the prompt.
+ *
+ * Behaviour driven from here:
+ *   1. acbLengthGuidance() — the band line injected into buildPrompt.
+ *   2. resolveTargetWords() — clamps a requested word count into the band.
+ *   3. maxTokensFor() — sizes the API max_tokens to the type's ceiling so large
+ *      pieces have headroom and nothing silently truncates.
+ */
+const LENGTH_PROFILES = {
+    // Flexible — depth adds value
+    blog_post:         { target: 1500, min: 1000, max: 2500 },
+    explainer_guide:   { target: 1800, min: 1200, max: 3000 },
+    tutorial:          { target: 1200, min: 900,  max: 2200 },
+    review_comparison: { target: 1500, min: 1000, max: 2500 },
+    course_overview:   { target: 1500, min: 1000, max: 2500 },
+    training_module:   { target: 1500, min: 1000, max: 2500 },
+    case_study_ld:     { target: 1200, min: 800,  max: 2000 },
+    // Tight — a right length; longer hurts
+    service_page:      { target: 1000, min: 700,  max: 1400 },
+    landing_page:      { target: 900,  min: 600,  max: 1300 },
+    about_us:          { target: 700,  min: 500,  max: 1000 },
+    faq_page:          { target: 800,  min: 400,  max: 1400 },
+    woocommerce_product:{ target: 450, min: 300,  max: 700  },
+    vehicle_listing:   { target: 400,  min: 250,  max: 650  },
+    press_release:     { target: 600,  min: 400,  max: 800  },
+    recipe:            { target: 600,  min: 350,  max: 1000 },
+    onboarding_doc:    { target: 800,  min: 500,  max: 1400 },
+};
+const DEFAULT_PROFILE = { target: 1200, min: 600, max: 2000 };
+const GLOBAL_MAX_WORDS = 4000;        // hard backstop, no matter what a user requests
+const STRUCTURAL_MAX_TOKENS = 8000;   // budget for typeless/structural content (lists, JSON, etc.)
+
+function getLengthProfile(contentTypeId) {
+    return LENGTH_PROFILES[contentTypeId] || DEFAULT_PROFILE;
+}
+
+// Clamp a requested word count into the type's band (falling back to target).
+function resolveTargetWords(contentTypeId, requested) {
+    const p = getLengthProfile(contentTypeId);
+    const max = Math.min(p.max, GLOBAL_MAX_WORDS);
+    const min = Math.min(p.min, max);
+    let t = parseInt(requested, 10);
+    if (!t || isNaN(t)) t = p.target;
+    return Math.max(min, Math.min(max, t));
+}
+
+// The length line injected into the prompt — a band, not a bare number, so the
+// model writes what the topic needs instead of padding to hit a count.
+function acbLengthGuidance(contentTypeId, requested) {
+    const p = getLengthProfile(contentTypeId);
+    const max = Math.min(p.max, GLOBAL_MAX_WORDS);
+    const min = Math.min(p.min, max);
+    const target = resolveTargetWords(contentTypeId, requested);
+    return `aim for ~${target} words (${min}–${max} is a fine range — write what the topic genuinely needs and don't pad to hit a number)`;
+}
+
+// Size the API max_tokens to the type's ceiling (~1.6 tokens/word + overhead for
+// the SEO block, headings and FAQ). Structural types get a flat generous budget.
+function maxTokensFor(contentTypeId) {
+    const p = LENGTH_PROFILES[contentTypeId];
+    if (!p) return STRUCTURAL_MAX_TOKENS;
+    const ceilingWords = Math.min(p.max, GLOBAL_MAX_WORDS);
+    return Math.min(24000, Math.ceil(ceilingWords * 1.6) + 1600);
+}
+
 function buildPrompt(contentTypeId, title, primaryKeyword, targetWordCount, meta) {
     const m = meta || {};
 
@@ -393,7 +469,7 @@ Output the content in clean Markdown first, then the SEO_DATA block. Nothing els
             return `**CONTENT BRIEF:**
 - Title: ${title}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1500} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **ARTICLE REQUIREMENTS:**
 1. Open with a powerful hook that immediately addresses the reader's pain point or curiosity
@@ -413,7 +489,7 @@ ${seoBlock}`;
             return `**CONTENT BRIEF:**
 - Title: ${title}
 - Topic: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1200} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 - Difficulty: ${m.difficulty || 'Beginner'}
 - Estimated Time: ${m.estimated_time || 'Not specified'}
 
@@ -453,7 +529,7 @@ ${seoBlock}`;
 - Price: ${m.price || 'Not specified'}
 - Target Customer: ${m.target_customer || 'General consumer'}
 - Key Features / Specs: ${m.key_features || 'Not specified'}
-- Target Length: ${targetWordCount || 500} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **PRODUCT DESCRIPTION REQUIREMENTS:**
 1. Open with a compelling one-liner that captures the product's core benefit
@@ -473,7 +549,7 @@ ${seoBlock}`;
 - Primary Keyword: ${primaryKeyword || title}
 - Target Audience: ${m.target_audience || 'Not specified'}
 - Key Benefits: ${m.key_benefits || 'Not specified'}
-- Target Length: ${targetWordCount || 1000} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **SERVICE PAGE REQUIREMENTS:**
 1. Open with a hero statement that immediately communicates value
@@ -493,7 +569,7 @@ ${seoBlock}`;
 - Founded: ${m.founded || 'Not specified'}
 - Mission / Values: ${m.mission || 'Not specified'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 800} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **ABOUT US REQUIREMENTS:**
 1. Open with a compelling hook — NOT "We are a company that..."
@@ -556,7 +632,7 @@ ${seoBlock}`;
 - Main Benefit: ${m.main_benefit || 'Not specified'}
 - Common Objections: ${m.objections || 'Not specified'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1000} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **LANDING PAGE REQUIREMENTS:**
 1. Open with a powerful headline and subheading that state the core benefit immediately
@@ -619,7 +695,7 @@ ${seoBlock}`;
 - Products / Services: ${m.products || title}
 - Overall Verdict: ${m.verdict || 'To be determined based on analysis'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1500} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **REVIEW / COMPARISON REQUIREMENTS:**
 1. Open with why this comparison/review matters to the reader
@@ -749,7 +825,7 @@ ${seoBlock}`;
 - Company: ${m.company_name || 'The Company'}
 - Key Information: ${m.key_info || 'Not specified'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 800} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **ONBOARDING DOCUMENT REQUIREMENTS:**
 1. Open with a warm, genuine welcome — make the new starter feel valued
@@ -792,7 +868,7 @@ ${seoBlock}`;
 - Audience Level: ${m.audience_level || 'Intermediate'}
 - Knowledge Check Questions: ${m.num_questions || '5'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1200} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **TRAINING MODULE REQUIREMENTS:**
 1. ## Module Introduction — context and why this topic matters (1 paragraph)
@@ -859,7 +935,7 @@ ${seoBlock}`;
 - Audience Level: ${m.audience_level || 'Beginner'}
 - Use Analogies: ${m.analogy_style || 'Yes — use everyday analogies'}
 - Primary Keyword: ${primaryKeyword || title}
-- Target Length: ${targetWordCount || 1000} words
+- Target Length: ${acbLengthGuidance(contentTypeId, targetWordCount)}
 
 **EXPLAINER / CONCEPT GUIDE REQUIREMENTS:**
 1. Open by explaining why understanding this concept matters
@@ -1055,4 +1131,4 @@ ${seoBlock}`;
     }
 }
 
-module.exports = { CONTENT_TYPES, TIER_RANK, canAccessContentType, buildPrompt };
+module.exports = { CONTENT_TYPES, TIER_RANK, canAccessContentType, buildPrompt, LENGTH_PROFILES, resolveTargetWords, maxTokensFor, acbLengthGuidance };
