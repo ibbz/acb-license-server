@@ -174,6 +174,7 @@ app.use('/api/beta-feedback',           require('./routes/beta-feedback'));
 app.use('/api/cron',                    require('./routes/cron'));
 app.use('/api/plugin',                  require('./routes/plugin-updates'));
 app.use('/api/outline',                 require('./routes/outline'));
+app.use('/api/strategist',              require('./routes/strategist'));
 app.use('/api/portal',                  require('./routes/portal-download'));
 app.use('/api/portal/support', 			require('./routes/portal-support-chat'));
 app.use('/api/admin',                   require('./routes/admin-releases'));
