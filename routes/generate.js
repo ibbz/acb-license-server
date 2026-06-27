@@ -22,7 +22,7 @@
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
-const { CONTENT_TYPES, canAccessContentType, buildPrompt } = require('../content-types');
+const { CONTENT_TYPES, canAccessContentType, buildPrompt, resolveTargetWords, maxTokensFor } = require('../content-types');
 const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
 const serp = require('../lib/serp');
 const creditsCache = require('../lib/credits-cache');
@@ -148,7 +148,8 @@ async function generateImage(title, imagePrompt, imageStyle) {
                 model: 'gpt-image-1.5',
                 prompt,
                 n: 1,
-                size: '1024x1024',
+                size: '1536x1024',
+                quality: 'medium',
             }),
         });
 
@@ -253,7 +254,10 @@ async function generateContent(payload) {
 
     // Build the user prompt using the content type template
     const activeContentType = content_type || 'blog_post';
-    let userPrompt = buildPrompt(activeContentType, title, primary_keyword, target_word_count, content_type_meta);
+    // Resolve the requested word count into this type's length band (clamped,
+    // with a global backstop). Used for the prompt, max_tokens, and SEO scoring.
+    const effectiveWordCount = resolveTargetWords(activeContentType, target_word_count);
+    let userPrompt = buildPrompt(activeContentType, title, primary_keyword, effectiveWordCount, content_type_meta);
     console.log(`[generate] Content type: ${activeContentType}`);
 
     // ── SEO grounding ───────────────────────────────────────────────────────
@@ -320,7 +324,7 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
         },
         body: JSON.stringify({
             model: 'claude-sonnet-4-5',
-            max_tokens: 16000,
+            max_tokens: maxTokensFor(activeContentType),
             temperature: 0.7,
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
@@ -333,6 +337,12 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
     }
 
     const data = await res.json();
+    if (data?.stop_reason === 'max_tokens') {
+        // Hit the token ceiling — output is truncated. With per-type max_tokens this
+        // should be rare; log loudly so it's visible in Railway rather than shipping
+        // a half-finished article (or, for quiz/assessment, unparseable JSON).
+        console.warn(`[generate] ⚠ TRUNCATED: stop_reason=max_tokens for type="${activeContentType}" (target ${effectiveWordCount}w, budget ${maxTokensFor(activeContentType)} tok). Output is incomplete.`);
+    }
     const text = data?.content?.map(b => b.text || '').join('');
     if (!text) throw new Error('Empty response from Anthropic API');
     return text;
@@ -642,7 +652,7 @@ router.post('/', async (req, res) => {
                 metaTitle:       seoMeta.metaTitle,
                 metaDescription: seoMeta.metaDescription,
                 focusKeyword:    seoMeta.focusKeyword || primary_keyword || title,
-                targetWordCount: target_word_count || 600,
+                targetWordCount: resolveTargetWords(activeContentType, target_word_count) || 600,
                 hasImage:        !!imageBase64,
                 videoCount:      youtubeVideos.length,
             });
