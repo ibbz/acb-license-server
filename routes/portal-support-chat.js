@@ -79,7 +79,7 @@ router.post('/chat', chatLimiter, requireAuth, async (req, res) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         // System is split so the large, unchanging knowledge base is cached.
         // (Prompt caching is generally available; if your account ever errors on

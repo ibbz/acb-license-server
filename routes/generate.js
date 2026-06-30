@@ -323,7 +323,7 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-5',
+            model: 'claude-sonnet-4-6',
             max_tokens: maxTokensFor(activeContentType),
             temperature: 0.7,
             system: systemPrompt,
@@ -698,7 +698,7 @@ router.post('/', async (req, res) => {
             // all fail silently and the content lands as a plain post.
             content_type:       activeContentType,
             content_type_meta:  content_type_meta || {},
-            ai_model:           'claude-sonnet-4-5',
+            ai_model:           'claude-sonnet-4-6',
             image_model:        'gpt-image-1.5',
             credits_used:       credits,
             execution_time:     Math.round((Date.now() - startTime) / 1000),
