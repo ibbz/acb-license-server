@@ -107,7 +107,25 @@ async function searchYouTube(title) {
  * Generate a featured image via OpenAI gpt-image-1.5.
  * Returns base64 PNG string or null on failure.
  */
-async function generateImage(title, imagePrompt, imageStyle) {
+// Translate a SERP region code (gl) into an image-locale instruction so the
+// model renders region-appropriate scenes — currency, signage, vehicles,
+// architecture — instead of defaulting to US visual clichés (e.g. dollar bills).
+// Returns '' when the code is unset/unknown, so behaviour is unchanged unless a
+// region is explicitly configured (never forces the wrong locale).
+function localeClause(gl) {
+    if (!gl) return '';
+    const place = {
+        gb: 'the United Kingdom', uk: 'the United Kingdom', us: 'the United States',
+        ca: 'Canada', au: 'Australia', ie: 'Ireland', nz: 'New Zealand',
+        in: 'India', za: 'South Africa', sg: 'Singapore', ae: 'the United Arab Emirates',
+        de: 'Germany', fr: 'France', es: 'Spain', it: 'Italy', nl: 'the Netherlands',
+        se: 'Sweden', no: 'Norway', dk: 'Denmark', pt: 'Portugal',
+    }[String(gl).toLowerCase().trim()];
+    if (!place) return '';
+    return ` The scene must be set in ${place}: any currency, signage, vehicles, architecture and everyday details should be appropriate to ${place}, not another country — for example, do not show US dollar bills unless ${place} is the United States.`;
+}
+
+async function generateImage(title, imagePrompt, imageStyle, gl) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
         console.warn('[generate] OPENAI_API_KEY not set — skipping image generation');
@@ -133,9 +151,10 @@ async function generateImage(title, imagePrompt, imageStyle) {
     };
 
     const styleDesc = styleDescriptions[imageStyle] || 'professional and clean';
+    const loc = localeClause(gl);
     const prompt = imagePrompt
-        ? `Create a ${styleDesc} featured image for a blog post. ${imagePrompt}. Title: "${title}". High quality, eye-catching, suitable for a professional blog.`
-        : `Create a ${styleDesc} featured image for a blog post titled: "${title}". High quality, professional, and eye-catching. No text overlays.`;
+        ? `Create a ${styleDesc} featured image for a blog post. ${imagePrompt}. Title: "${title}".${loc} High quality, eye-catching, suitable for a professional blog.`
+        : `Create a ${styleDesc} featured image for a blog post titled: "${title}".${loc} High quality, professional, and eye-catching. No text overlays.`;
 
     try {
         const res = await fetch('https://api.openai.com/v1/images/generations', {
@@ -622,7 +641,7 @@ router.post('/', async (req, res) => {
         try {
             [ytResults, imgResult] = await Promise.all([
                 include_youtube ? searchYouTube(title).catch(() => []) : Promise.resolve([]),
-                include_image !== false ? generateImage(title, image_prompt, image_style).catch(() => null) : Promise.resolve(null),
+                include_image !== false ? generateImage(title, image_prompt, image_style, serp_gl).catch(() => null) : Promise.resolve(null),
             ]);
         } catch (parallelErr) {
             console.warn('[generate] Parallel step error (non-fatal):', parallelErr.message);
