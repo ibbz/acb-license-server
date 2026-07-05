@@ -380,12 +380,19 @@ async function handleSubscriptionCancelled(subscription) {
 async function handlePaymentSucceeded(invoice) {
   const customerId = invoice.customer;
 
-  // Reset monthly usage on successful payment (for monthly subscriptions)
+  // Reset monthly usage on successful payment (for monthly subscriptions).
+  // Also reactivate: if this customer was suspended after dunning failed and
+  // they've now paid (e.g. updated their card and the retry cleared), a
+  // successful payment must lift the suspension — otherwise they've paid and
+  // stay locked out. Reactivation on the checkout path (handleSubscriptionCheckout)
+  // doesn't cover a recovery that arrives as a renewal invoice rather than a
+  // new checkout, so we handle it here too.
   await pool.query(`
     UPDATE license_keys 
     SET 
       posts_used_this_month = 0,
       month_reset_date = NOW() + INTERVAL '1 month',
+      status = CASE WHEN status = 'suspended' THEN 'active' ELSE status END,
       updated_at = NOW()
     WHERE stripe_customer_id = $1
   `, [customerId]);
@@ -430,15 +437,41 @@ async function handlePaymentSucceeded(invoice) {
 async function handlePaymentFailed(invoice) {
   const customerId = invoice.customer;
 
-  await pool.query(`
+  // Do NOT suspend on every payment_failed. Stripe fires this event for
+  // situations that are NOT a final failure, and suspending on them wrongly
+  // cuts off a paying customer:
+  //   • SCA / 3D Secure: the first invoice can "fail" while it waits for the
+  //     customer to authenticate in their banking app. It succeeds seconds
+  //     later once they approve. (This is what we saw during the smoke test.)
+  //   • Dunning retries: a soft decline on a renewal sets next_payment_attempt
+  //     to a future date — Stripe will retry over the coming days and usually
+  //     succeeds. Suspending on attempt #1 manufactures churn.
+  //
+  // next_payment_attempt is a unix timestamp when another retry is scheduled,
+  // or null when Stripe has given up. We only suspend once it's null — i.e.
+  // dunning is genuinely exhausted and the customer truly hasn't paid.
+  if (invoice.next_payment_attempt) {
+    const when = new Date(invoice.next_payment_attempt * 1000).toISOString();
+    console.log(
+      `[webhook] payment_failed (not final): ${customerId} — Stripe will retry at ${when}; not suspending.`
+    );
+    return;
+  }
+
+  const r = await pool.query(`
     UPDATE license_keys 
     SET 
       status = 'suspended',
       updated_at = NOW()
     WHERE stripe_customer_id = $1
+      AND status <> 'suspended'
   `, [customerId]);
 
-  console.log(`❌ Payment failed: ${customerId} → suspended`);
+  if (r.rowCount > 0) {
+    console.log(`❌ Payment failed (dunning exhausted): ${customerId} → suspended`);
+  } else {
+    console.log(`[webhook] payment_failed (final) for ${customerId}: no active licence to suspend.`);
+  }
 }
 
 module.exports = router;
