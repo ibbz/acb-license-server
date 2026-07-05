@@ -40,7 +40,12 @@ async function callClaude(prompt) {
         },
         body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 2000,
+            // Grounded, multi-section outlines (especially from richer Strategist
+            // briefs) can exceed a tight ceiling and truncate mid-array, which then
+            // surfaces downstream as a confusing "JSON parse" error rather than the
+            // real cause. 2000 was too tight; 8000 comfortably fits any realistic
+            // outline while staying well within model limits.
+            max_tokens: 8000,
             temperature: 0.5,
             messages: [{ role: 'user', content: prompt }],
         }),
@@ -53,7 +58,9 @@ async function callClaude(prompt) {
     const data = await res.json();
     const text = data?.content?.map(b => b.text || '').join('');
     if (!text) throw new Error('Empty response from Anthropic API');
-    return text;
+    // Surface truncation explicitly. If the model hit the token ceiling the JSON
+    // is incomplete; callers should report that plainly rather than as a parse bug.
+    return { text, truncated: data?.stop_reason === 'max_tokens' };
 }
 
 router.post('/', async (req, res) => {
@@ -81,7 +88,14 @@ router.post('/', async (req, res) => {
 
         // 2. structured outline from Claude
         const prompt  = serp.buildOutlinePrompt(kw, title, ground);
-        const rawText = await callClaude(prompt);
+        const { text: rawText, truncated } = await callClaude(prompt);
+
+        if (truncated) {
+            // The model ran out of output budget — the JSON is genuinely incomplete.
+            // Report the real cause instead of letting it fall through to a parse error.
+            console.warn('[outline] ⚠ TRUNCATED: stop_reason=max_tokens — outline incomplete. Consider a shorter brief or higher budget.');
+            return res.status(502).json({ success: false, error: 'The outline was too long to complete. Please retry, or simplify the brief.' });
+        }
 
         let outline;
         try {
