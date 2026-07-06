@@ -422,13 +422,18 @@ function acbLengthGuidance(contentTypeId, requested) {
     return `aim for ~${target} words (${min}–${max} is a fine range — write what the topic genuinely needs and don't pad to hit a number)`;
 }
 
-// Size the API max_tokens to the type's ceiling (~1.6 tokens/word + overhead for
-// the SEO block, headings and FAQ). Structural types get a flat generous budget.
+// Size the API max_tokens to the type's ceiling. The generated output is not
+// plain prose — it's Markdown (headings, lists) PLUS an appended SEO data block,
+// meta description and FAQ. Real token usage for that runs ~2.2–2.5 tokens/word,
+// well above a naive prose ratio. The old 1.6×words + 1600 factor under-budgeted
+// and truncated longer/structured types (e.g. tutorials hit the ceiling mid-article).
+// 2.4 tokens/word + 2200 overhead gives every type headroom for the trailing
+// SEO/FAQ block without exceeding model limits (hard-capped at 24000).
 function maxTokensFor(contentTypeId) {
     const p = LENGTH_PROFILES[contentTypeId];
     if (!p) return STRUCTURAL_MAX_TOKENS;
     const ceilingWords = Math.min(p.max, GLOBAL_MAX_WORDS);
-    return Math.min(24000, Math.ceil(ceilingWords * 1.6) + 1600);
+    return Math.min(24000, Math.ceil(ceilingWords * 2.4) + 2200);
 }
 
 function buildPrompt(contentTypeId, title, primaryKeyword, targetWordCount, meta) {
