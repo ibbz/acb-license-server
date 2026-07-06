@@ -1,7 +1,7 @@
 {
   "name": "ai-content-bridge-license-server",
   "version": "1.0.0",
-  "description": "License validation, usage tracking, generation proxy and customer/admin portals for the AI Content Bridge WordPress plugin",
+  "description": "License validation, usage tracking, generation proxy and customer/admin portal for the AI Content Bridge WordPress plugin",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
