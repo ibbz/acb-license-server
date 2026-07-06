@@ -14,7 +14,16 @@ const router    = express.Router();
 const rateLimit = require('express-rate-limit');
 const fs        = require('fs');
 const path      = require('path');
+const { Pool }  = require('pg');
 const { requireAuth } = require('./portal-auth');
+const costLog   = require('../lib/cost-log');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
 
 // ── Load the knowledge base once at boot (cached in memory) ───────────────────
 const KB_PATH = process.env.BOT_KB_PATH || path.join(__dirname, '..', 'bot', 'docs-bot-knowledge.md');
@@ -79,7 +88,7 @@ router.post('/chat', chatLimiter, requireAuth, async (req, res) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: TEXT_MODEL,
         max_tokens: 1024,
         // System is split so the large, unchanging knowledge base is cached.
         // (Prompt caching is generally available; if your account ever errors on
@@ -99,6 +108,29 @@ router.post('/chat', chatLimiter, requireAuth, async (req, res) => {
     }
 
     const data = await r.json();
+
+    // Cost instrumentation. This is the ONE ACB route where prompt caching is
+    // live (the KB block above) — the first request in a 5-min window pays the
+    // 1.25x cache WRITE on the whole knowledge base, subsequent ones pay the
+    // 0.10x cache READ. Both show up in data.usage and are priced by
+    // lib/pricing.js. Attribution comes from the portal JWT (req.user).
+    // Fire-and-forget: never delays or fails the reply.
+    costLog.resolveLicenseId(pool, req.user?.license_key).then(licenseKeyId =>
+      costLog.insertCostRow(pool, {
+        licenseKeyId,
+        domain:      'portal',
+        postTitle:   'Support assistant reply',
+        contentType: 'support_chat',
+        model:       TEXT_MODEL,
+        usage:       data?.usage || null,
+        stop_reason: data?.stop_reason || null,
+        image:       null,
+        serpCalls:   0,
+        costEvent:   'support_chat',
+        succeeded:   true,
+      })
+    ).catch(() => {});
+
     const reply = (data.content || [])
       .filter(b => b.type === 'text')
       .map(b => b.text)

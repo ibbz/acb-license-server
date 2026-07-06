@@ -17,6 +17,9 @@ const pool = new Pool({
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
+const costLog = require('../lib/cost-log');
+const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
+
 router.post('/', async (req, res) => {
     const { license_key, sample } = req.body;
 
@@ -35,6 +38,7 @@ router.post('/', async (req, res) => {
     }
 
     // ── Verify license is active ────────────────────────────────────────────
+    let licenseKeyId = null; // hoisted for the cost row (lib/cost-log.js)
     try {
         const licenseResult = await pool.query(
             `SELECT id, tier, status, email_verified FROM license_keys WHERE license_key = $1`,
@@ -46,6 +50,7 @@ router.post('/', async (req, res) => {
         }
 
         const license = licenseResult.rows[0];
+        licenseKeyId = license.id;
 
         // Free tier must be email verified
         if (license.tier === 'free' && !license.email_verified) {
@@ -100,7 +105,7 @@ Be specific and actionable. A writer should be able to read this profile and imm
                 'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
-                model:      'claude-sonnet-4-6',
+                model:      TEXT_MODEL,
                 max_tokens: 1024,
                 system:     systemPrompt,
                 messages:   [{ role: 'user', content: userPrompt }],
@@ -114,9 +119,26 @@ Be specific and actionable. A writer should be able to read this profile and imm
         }
 
         const data   = await response.json();
+        // Cost instrumentation: a returned response is billed regardless of
+        // whether the profile parses — record it either way (succeeded flag
+        // carries the outcome). Fire-and-forget; never delays the response.
+        const recordCost = (succeeded) => costLog.insertCostRow(pool, {
+            licenseKeyId: licenseKeyId,
+            domain:       'extract-style',
+            postTitle:    'Style profile extraction',
+            contentType:  'extract_style',
+            model:        TEXT_MODEL,
+            usage:        data?.usage || null,
+            stop_reason:  data?.stop_reason || null,
+            image:        null,
+            serpCalls:    0,
+            costEvent:    'extract_style',
+            succeeded,
+        }).catch(() => {});
         const text   = data?.content?.map(b => b.text || '').join('').trim();
 
         if (!text) {
+            recordCost(false);
             return res.status(500).json({ success: false, error: 'Empty response from AI. Please try again.' });
         }
 
@@ -127,6 +149,7 @@ Be specific and actionable. A writer should be able to read this profile and imm
             profile = JSON.parse(clean);
         } catch (parseErr) {
             console.error('[extract-style] JSON parse error:', parseErr.message, '\nRaw:', clean);
+            recordCost(false);
             return res.status(500).json({ success: false, error: 'Could not parse style profile. Please try again.' });
         }
 
@@ -135,10 +158,12 @@ Be specific and actionable. A writer should be able to read this profile and imm
         const missing  = required.filter(f => !profile[f]);
         if (missing.length > 0) {
             console.error('[extract-style] Missing fields:', missing);
+            recordCost(false);
             return res.status(500).json({ success: false, error: 'Incomplete style profile returned. Please try again.' });
         }
 
         console.log(`[extract-style] Profile extracted for license ...${license_key.slice(-6)}`);
+        recordCost(true);
 
         return res.json({
             success: true,

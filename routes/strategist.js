@@ -44,6 +44,9 @@ const serp        = require('../lib/serp');
 const serpEvents  = require('../lib/serp-events');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
+const costLog      = require('../lib/cost-log');
+
+const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -102,7 +105,7 @@ async function callClaude(prompt, maxTokens = 8000) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       max_tokens: maxTokens,
       temperature: 0.6,
       messages: [{ role: 'user', content: prompt }],
@@ -115,7 +118,8 @@ async function callClaude(prompt, maxTokens = 8000) {
   const data = await res.json();
   const txt = data?.content?.map(b => b.text || '').join('');
   if (!txt) throw new Error('Empty response from Anthropic API');
-  return txt;
+  // usage/stop_reason returned for cost instrumentation (lib/cost-log.js).
+  return { text: txt, usage: data?.usage || null, stop_reason: data?.stop_reason || null };
 }
 
 // ─── tier + palette ──────────────────────────────────────────────────────────
@@ -216,25 +220,30 @@ function normaliseKey(s) {
 // ─── research (reuses lib/serp + lib/serp-events), cached per keyword ────────
 const researchCache = new Map(); // normalisedKeyword -> { expires, grounding }
 
-async function groundKeyword(kw, gl) {
+async function groundKeyword(kw, gl, tally) {
   const key = `${normaliseKey(kw)}|${gl}`;
   const hit = researchCache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.grounding;
+  if (hit && hit.expires > Date.now()) return hit.grounding; // cache hit — no Serper spend
   let grounding = null;
   if (serp.enabled()) {
+    if (tally) tally.serpCalls += 1; // billed on attempt, cache misses only
     grounding = await serp.getSerpGrounding(kw, { gl }).catch(() => null);
   }
   researchCache.set(key, { expires: Date.now() + RESEARCH_TTL_MS, grounding });
   return grounding;
 }
 
-async function runResearch(seeds, gl, industry, location, windowStart, windowEnd) {
+async function runResearch(seeds, gl, industry, location, windowStart, windowEnd, tally) {
   const grounded = {};
   // Sequential keeps us gentle on Serper + the competitor page fetches; the list
   // is capped at MAX_SEED_KEYWORDS so worst case is bounded.
   for (const kw of seeds) {
-    grounded[kw] = await groundKeyword(kw, gl);
+    grounded[kw] = await groundKeyword(kw, gl, tally);
   }
+  // Cost note: lib/serp-events runs up to 2 search queries + 1 news query per
+  // sweep. Counted as 3 when enabled — a deliberate upper bound (early-exit on
+  // MAX_EVENTS can make it fewer). At $0.001/search the imprecision is < 0.3¢.
+  if (tally && serpEvents.enabled()) tally.serpCalls += 3;
   const events = await serpEvents.getTimeboundEvents(industry, location, windowStart, windowEnd)
     .catch(() => []);
   return { grounded, events };
@@ -524,6 +533,21 @@ router.post('/plan', async (req, res) => {
   const client = await pool.connect();
   let charged = null; // { allocations } once we deduct
 
+  // Cost instrumentation — hoisted so the outer catch can also stamp the row.
+  // usageLogId stays null until the charge row is inserted; attachCost no-ops
+  // on a null id, so pre-charge failures record nothing (nothing was spent).
+  let usageLogId = null;
+  const costCtx = { usage: null, stop_reason: null, serpCalls: 0 };
+  const recordCost = (succeeded) => costLog.attachCost(pool, usageLogId, {
+    model:       TEXT_MODEL,
+    usage:       costCtx.usage,
+    stop_reason: costCtx.stop_reason,
+    image:       null,
+    serpCalls:   costCtx.serpCalls,
+    costEvent:   'strategist_plan',
+    succeeded,
+  });
+
   try {
     // Resolve tier + compute the slot dates + cost up front (all pure / cheap).
     const lkRow = await client.query(`SELECT tier FROM license_keys WHERE license_key = $1 AND status = 'active' LIMIT 1`, [license_key]);
@@ -556,10 +580,15 @@ router.post('/plan', async (req, res) => {
     }
 
     // Record the plan-run charge in usage_logs, then commit + invalidate cache.
-    await client.query(`
+    // RETURNING id: this attempt's own row — token/Serper cost is attached to it
+    // once the run resolves (success or refund), one row per attempt.
+    const usageIns = await client.query(`
       INSERT INTO usage_logs (license_key_id, domain, post_title, content_type, credits_used, created_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING id
     `, [gate.licenseId, business.location || 'strategist', `Content plan (${dates.length} posts)`, 'strategist_plan', cost]);
+    const usageLogIdRow = usageIns.rows[0]?.id ?? null;
+    usageLogId = usageLogIdRow;
     await client.query('COMMIT');
     creditsCache.invalidate(license_key);
     charged = { allocations: gate.allocations };
@@ -568,18 +597,24 @@ router.post('/plan', async (req, res) => {
     const gl = serp_gl || process.env.SERP_DEFAULT_GL || 'us';
     const windowStart = dates[0];
     const windowEnd   = dates[dates.length - 1];
-    const { grounded, events } = await runResearch(seeds, gl, business.industry, business.location, windowStart, windowEnd);
+    const { grounded, events } = await runResearch(seeds, gl, business.industry, business.location, windowStart, windowEnd, costCtx);
 
     const slots = dates.map((date, i) => ({ i, date }));
     const prompt = buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude });
 
     let parsed;
     try {
-      parsed = parseJsonLoose(await callClaude(prompt));
+      const claudeRes = await callClaude(prompt);
+      costCtx.usage       = claudeRes.usage;
+      costCtx.stop_reason = claudeRes.stop_reason;
+      parsed = parseJsonLoose(claudeRes.text);
     } catch (e) {
       console.warn('[strategist/plan] planning parse failed:', e.message);
       if (charged) await creditLedger.refundSpanning(pool, charged.allocations);
       creditsCache.invalidate(license_key);
+      // Refund returns the customer's credits — the Anthropic/Serper spend
+      // already happened and is recorded as waste (succeeded=false).
+      await recordCost(false);
       return res.status(502).json({ success: false, error: 'Could not build the plan. Your credits were not charged — please retry.' });
     }
 
@@ -587,6 +622,7 @@ router.post('/plan', async (req, res) => {
     if (rawItems.length === 0) {
       if (charged) await creditLedger.refundSpanning(pool, charged.allocations);
       creditsCache.invalidate(license_key);
+      await recordCost(false); // full Claude pass paid for, nothing usable back
       return res.status(502).json({ success: false, error: 'The plan came back empty. Your credits were not charged — please retry.' });
     }
 
@@ -597,6 +633,8 @@ router.post('/plan', async (req, res) => {
     items = dedupePlan(items, exclude);
 
     const infoCount = items.filter(i => i.intent === 'informational').length;
+
+    await recordCost(true); // stamp the true provider cost onto the charge row
 
     return res.json({
       success: true,
@@ -621,6 +659,9 @@ router.post('/plan', async (req, res) => {
     // We may have committed the charge before the throw — refund it.
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (charged) { await creditLedger.refundSpanning(pool, charged.allocations); creditsCache.invalidate(license_key); }
+    // Stamp whatever provider spend happened before the throw (no-op if the
+    // charge row was never created). attachCost never throws.
+    await recordCost(false);
     return res.status(500).json({ success: false, error: 'Plan generation failed. Any charge has been refunded — please retry.' });
   } finally {
     client.release();

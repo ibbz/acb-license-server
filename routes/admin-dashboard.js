@@ -71,6 +71,10 @@ router.get('/dashboard', auth, async (req, res) => {
         `);
 
         // Usage this month
+        // cost_event filter: outline / extract_style / support_chat rows are
+        // cost-instrumentation rows (credits_used=0) — they must not inflate
+        // generation counts. NULL cost_event = legacy generate rows.
+        // 'strategist_plan' is a charged run and was always counted — kept.
         const usageStats = await pool.query(`
             SELECT
                 COUNT(*)                                   AS generations_total,
@@ -81,6 +85,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COUNT(DISTINCT domain)                     AS unique_domains
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
+              AND (cost_event IS NULL OR cost_event IN ('generate', 'strategist_plan'))
         `);
 
         // Daily signups last 30 days for sparkline
@@ -95,7 +100,7 @@ router.get('/dashboard', auth, async (req, res) => {
             ORDER BY day
         `);
 
-        // Daily generations last 30 days
+        // Daily generations last 30 days (cost-instrumentation rows excluded — see usageStats)
         const dailyGenerations = await pool.query(`
             SELECT
                 DATE(created_at) AS day,
@@ -104,6 +109,7 @@ router.get('/dashboard', auth, async (req, res) => {
             FROM usage_logs
             WHERE created_at >= NOW() - INTERVAL '30 days'
               AND post_title != 'VALIDATION_CHECK'
+              AND (cost_event IS NULL OR cost_event IN ('generate', 'strategist_plan'))
             GROUP BY DATE(created_at)
             ORDER BY day
         `);
@@ -126,7 +132,34 @@ router.get('/dashboard', auth, async (req, res) => {
             WHERE tier = 'free'
         `);
 
-        // Estimated costs (Anthropic ~$0.003/credit, OpenAI image ~$0.02/gen)
+        // ── Real provider cost (cost instrumentation, 2026-07) ────────────
+        // Authoritative: SUM(total_cost_usd) written by lib/pricing.js at
+        // generation time. Rows from before the instrumentation deploy have
+        // NULL cost — priced_coverage shows how much of the window is real.
+        // The old hardcoded estimate ($0.003/credit + $0.02/gen — the image
+        // figure alone was 2.5x under reality) is kept ONLY as a labelled
+        // fallback for the transition window and reported separately.
+        const realCost = await pool.query(`
+            SELECT
+                COALESCE(SUM(total_cost_usd), 0)                                                        AS cost_total,
+                COALESCE(SUM(total_cost_usd) FILTER (WHERE created_at >= date_trunc('month', NOW())), 0) AS cost_this_month,
+                COALESCE(SUM(total_cost_usd) FILTER (WHERE created_at >= date_trunc('month', NOW())
+                                                       AND succeeded = false), 0)                        AS waste_this_month,
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))                         AS rows_this_month,
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW())
+                                   AND total_cost_usd IS NOT NULL)                                       AS priced_rows_this_month
+            FROM usage_logs
+            WHERE post_title != 'VALIDATION_CHECK'
+        `);
+        const rc = realCost.rows[0];
+        const costTotal          = parseFloat(rc.cost_total) || 0;
+        const costThisMonth      = parseFloat(rc.cost_this_month) || 0;
+        const wasteThisMonth     = parseFloat(rc.waste_this_month) || 0;
+        const rowsThisMonth      = parseInt(rc.rows_this_month) || 0;
+        const pricedRowsThisMonth = parseInt(rc.priced_rows_this_month) || 0;
+        const pricedCoveragePct  = rowsThisMonth > 0 ? Math.round((pricedRowsThisMonth / rowsThisMonth) * 100) : null;
+
+        // Legacy estimate — transition fallback only (labelled as such in the response)
         const totalConsumed = parseFloat(creditStats.rows[0].total_consumed) || 0;
         const totalGenerations = parseInt(usageStats.rows[0].generations_total) || 0;
         const estimatedCost = (totalConsumed * 0.003) + (totalGenerations * 0.02);
@@ -172,9 +205,25 @@ router.get('/dashboard', auth, async (req, res) => {
                 mrr_estimate:    mrrEstimate,
                 mrr_stripe:      stripeMrr,
                 arr_estimate:    mrrEstimate * 12,
-                cost_total:      Math.round(estimatedCost * 100) / 100,
-                cost_this_month: Math.round(estimatedCostThisMonth * 100) / 100,
-                margin_pct:      mrrEstimate > 0 ? Math.round(((mrrEstimate - estimatedCostThisMonth) / mrrEstimate) * 100) : null,
+                // Real, server-computed provider cost (lib/pricing.js) — the
+                // authoritative figures. cost_estimated_* are the old
+                // hardcoded-rate estimates, kept only for the transition
+                // window while pre-instrumentation rows age out.
+                cost_total:      Math.round(costTotal * 100) / 100,
+                cost_this_month: Math.round(costThisMonth * 100) / 100,
+                waste_this_month: Math.round(wasteThisMonth * 100) / 100,
+                priced_coverage_pct: pricedCoveragePct,
+                cost_estimated_total:      Math.round(estimatedCost * 100) / 100,
+                cost_estimated_this_month: Math.round(estimatedCostThisMonth * 100) / 100,
+                // Margin: prefer Stripe's real MRR; COGS is the real cost sum.
+                // Honest label: Stripe fees are NOT yet netted off revenue
+                // (Phase 2 of the cost-instrumentation scope) — this is
+                // gross-revenue margin, slightly flattering by ~4-5%.
+                margin_pct: (() => {
+                    const rev = (stripeMrr ?? mrrEstimate);
+                    return rev > 0 ? Math.round(((rev - costThisMonth) / rev) * 100) : null;
+                })(),
+                margin_basis: 'gross revenue minus real provider cost; Stripe fees not yet netted (Phase 2)',
             },
             charts: {
                 daily_signups:     dailySignups.rows,
@@ -836,6 +885,99 @@ router.post('/reinstate-user', auth, async (req, res) => {
         return res.status(500).json({ success: false, error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// ── GET /api/admin/costs ──────────────────────────────────────────────────────
+// Real provider-cost analytics (cost instrumentation, 2026-07). Everything here
+// reads server-computed total_cost_usd — no estimates. ?days=N window (default
+// 30, max 365). Sections:
+//   summary     — spend, waste (succeeded=false: refunded to the customer but
+//                 paid to the provider), truncations, priced-row coverage
+//   by_event    — generate / outline / strategist_plan / extract_style / support_chat
+//   by_type     — cost per content type (which types erode margin)
+//   by_tier     — cost per plan tier, incl. free-tier burn (the launch question)
+//   distribution— p50 / p95 / max of per-attempt cost (the worst-case tail)
+router.get('/costs', auth, async (req, res) => {
+    const days = Math.min(Math.max(parseInt(req.query.days || 30), 1), 365);
+    try {
+        const [summary, byEvent, byType, byTier, dist] = await Promise.all([
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(total_cost_usd), 0)                             AS total_cost,
+                    COALESCE(SUM(text_cost_usd), 0)                              AS text_cost,
+                    COALESCE(SUM(image_cost_usd), 0)                             AS image_cost,
+                    COALESCE(SUM(serp_cost_usd), 0)                              AS serp_cost,
+                    COALESCE(SUM(total_cost_usd) FILTER (WHERE succeeded = false), 0) AS waste_cost,
+                    COUNT(*) FILTER (WHERE succeeded = false)                    AS failed_attempts,
+                    COUNT(*) FILTER (WHERE stop_reason = 'max_tokens')           AS truncations,
+                    COUNT(*) FILTER (WHERE total_cost_usd IS NOT NULL)           AS priced_rows,
+                    COUNT(*) FILTER (WHERE cost_event IS NOT NULL AND total_cost_usd IS NULL) AS unpriced_rows,
+                    COUNT(*)                                                     AS all_rows
+                FROM usage_logs
+                WHERE created_at >= NOW() - ($1 || ' days')::interval
+                  AND post_title != 'VALIDATION_CHECK'
+            `, [days]),
+            pool.query(`
+                SELECT cost_event,
+                       COUNT(*)                          AS calls,
+                       COALESCE(SUM(total_cost_usd), 0)  AS cost,
+                       COALESCE(AVG(total_cost_usd), 0)  AS avg_cost
+                FROM usage_logs
+                WHERE created_at >= NOW() - ($1 || ' days')::interval
+                  AND cost_event IS NOT NULL
+                GROUP BY cost_event
+                ORDER BY cost DESC
+            `, [days]),
+            pool.query(`
+                SELECT content_type,
+                       COUNT(*)                          AS generations,
+                       COALESCE(SUM(total_cost_usd), 0)  AS cost,
+                       COALESCE(AVG(total_cost_usd), 0)  AS avg_cost,
+                       COALESCE(SUM(credits_used), 0)    AS credits
+                FROM usage_logs
+                WHERE created_at >= NOW() - ($1 || ' days')::interval
+                  AND cost_event = 'generate'
+                  AND total_cost_usd IS NOT NULL
+                GROUP BY content_type
+                ORDER BY cost DESC
+            `, [days]),
+            pool.query(`
+                SELECT COALESCE(lk.tier, 'unattributed') AS tier,
+                       COUNT(*)                          AS generations,
+                       COALESCE(SUM(ul.total_cost_usd), 0) AS cost,
+                       COALESCE(AVG(ul.total_cost_usd), 0) AS avg_cost
+                FROM usage_logs ul
+                LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
+                WHERE ul.created_at >= NOW() - ($1 || ' days')::interval
+                  AND ul.total_cost_usd IS NOT NULL
+                GROUP BY COALESCE(lk.tier, 'unattributed')
+                ORDER BY cost DESC
+            `, [days]),
+            pool.query(`
+                SELECT
+                    PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY total_cost_usd) AS p50,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY total_cost_usd) AS p95,
+                    MAX(total_cost_usd)                                          AS max
+                FROM usage_logs
+                WHERE created_at >= NOW() - ($1 || ' days')::interval
+                  AND cost_event = 'generate'
+                  AND total_cost_usd IS NOT NULL
+            `, [days]),
+        ]);
+
+        return res.json({
+            success: true,
+            window_days: days,
+            summary: summary.rows[0],
+            by_event: byEvent.rows,
+            by_type: byType.rows,
+            by_tier: byTier.rows,        // free-tier burn = the 'free' row's cost
+            distribution: dist.rows[0],  // per-generate-attempt cost: p50 / p95 / max
+        });
+    } catch (err) {
+        console.error('[admin/costs]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
     }
 });
 

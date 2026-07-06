@@ -87,9 +87,13 @@ CREATE INDEX idx_credit_batches_notes ON credit_batches (notes);
 
 -- ── 4. usage_logs ─────────────────────────────────────────────────────────────
 -- user_id widened to BIGINT (live dump had INTEGER) so the FK to users.id is clean.
+-- license_key_id is NULLABLE: outline/support-chat cost rows may be unattributable
+-- (older plugin builds) — complete COGS beats attribution (add-cost-columns.sql).
+-- api_cost is legacy/client-writable via /api/usage — total_cost_usd (server-
+-- computed, lib/pricing.js) is the authoritative provider-cost figure.
 CREATE TABLE usage_logs (
     id                       BIGSERIAL PRIMARY KEY,
-    license_key_id           BIGINT NOT NULL,
+    license_key_id           BIGINT,
     user_id                  BIGINT,
     domain                   VARCHAR(255) NOT NULL,
     post_title               VARCHAR(500),
@@ -100,6 +104,25 @@ CREATE TABLE usage_logs (
     api_cost                 NUMERIC,
     credits_used             INTEGER DEFAULT 0,
     style_profile_used       VARCHAR(100),
+    -- Cost instrumentation (add-cost-columns.sql; scope 2026-07-06) ---------
+    model                    VARCHAR(60),
+    input_tokens             INTEGER,
+    output_tokens            INTEGER,
+    cache_read_tokens        INTEGER,
+    cache_write_tokens       INTEGER,
+    stop_reason              VARCHAR(30),
+    image_model              VARCHAR(60),
+    image_size               VARCHAR(20),
+    image_quality            VARCHAR(20),
+    serp_search_count        INTEGER,
+    text_cost_usd            NUMERIC(10,5),
+    image_cost_usd           NUMERIC(10,5),
+    serp_cost_usd            NUMERIC(10,5),
+    total_cost_usd           NUMERIC(10,5),
+    price_version            VARCHAR(20),
+    cost_event               VARCHAR(30),
+    succeeded                BOOLEAN,
+    -- -----------------------------------------------------------------------
     created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT usage_logs_license_key_id_fkey
         FOREIGN KEY (license_key_id) REFERENCES license_keys (id) ON DELETE CASCADE,
@@ -108,6 +131,8 @@ CREATE TABLE usage_logs (
 );
 CREATE INDEX idx_usage_logs_license_key_id ON usage_logs (license_key_id);
 CREATE INDEX idx_usage_logs_created_at ON usage_logs (created_at);
+CREATE INDEX idx_usage_logs_cost_month ON usage_logs (created_at) WHERE total_cost_usd IS NOT NULL;
+CREATE INDEX idx_usage_logs_cost_event ON usage_logs (cost_event) WHERE cost_event IS NOT NULL;
 
 -- ── 5. free_registrations ─────────────────────────────────────────────────────
 -- password_hash retained (exists in the live schema) but ACB uses magic-link login,

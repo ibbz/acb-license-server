@@ -27,6 +27,16 @@ const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
 const serp = require('../lib/serp');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
+const costLog = require('../lib/cost-log');
+
+// The one text model and image configuration this route uses. Single constants
+// so the API call, the publish payload and the cost row can never disagree.
+// Changing model/size/quality here REQUIRES a matching entry in lib/pricing.js
+// (an unknown key prices as null and logs loudly — see cost instrumentation).
+const TEXT_MODEL  = 'claude-sonnet-4-6';
+const IMAGE_MODEL = 'gpt-image-1.5';
+const IMAGE_SIZE  = '1536x1024';
+const IMAGE_QUALITY = 'medium';
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -55,15 +65,20 @@ async function deductCredits(client, licenseKey, credits, domain, postTitle, con
         return { success: false, error: ded.error || 'Insufficient credits' };
     }
 
-    await client.query(`
+    // RETURNING id: this attempt's own row. Cost data (tokens, provider spend,
+    // succeeded flag) is attached to it once the pipeline resolves — one row
+    // per attempt, so regenerations append rather than overwrite (each regen
+    // deducts again and therefore creates its own row).
+    const ins = await client.query(`
         INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, style_profile_used, created_at)
         VALUES (
             (SELECT id FROM license_keys WHERE license_key = $1),
             $2, $3, $4, $5, $6, NOW()
         )
+        RETURNING id
     `, [licenseKey, domain || 'unknown', postTitle || 'Untitled', credits, contentType || 'blog_post', styleProfileName || null]);
 
-    return { success: true, allocations: ded.allocations, credits_deducted: credits };
+    return { success: true, allocations: ded.allocations, credits_deducted: credits, usage_log_id: ins.rows[0]?.id ?? null };
 }
 
 /**
@@ -164,11 +179,11 @@ async function generateImage(title, imagePrompt, imageStyle, gl) {
                 'Authorization': `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
-                model: 'gpt-image-1.5',
+                model: IMAGE_MODEL,
                 prompt,
                 n: 1,
-                size: '1536x1024',
-                quality: 'medium',
+                size: IMAGE_SIZE,
+                quality: IMAGE_QUALITY,
             }),
         });
 
@@ -260,7 +275,7 @@ function renderApprovedOutline(outline) {
     return lines.join('\n');
 }
 
-async function generateContent(payload) {
+async function generateContent(payload, costCtx) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured on server');
 
@@ -289,6 +304,10 @@ async function generateContent(payload) {
         console.log('[generate] Using approved outline from review step');
     } else if (serp.enabled() && primary_keyword && SERP_GROUNDING_TYPES.has(activeContentType)) {
         try {
+            // Cost note: the Serper search is billed on attempt (an empty result
+            // still consumes a Serper credit), so count it here, not on success.
+            // Competitor-page fetches inside getSerpGrounding are free egress.
+            if (costCtx) costCtx.serpCalls += 1;
             const ground = await serp.getSerpGrounding(primary_keyword, {
                 gl: serp_gl || process.env.SERP_DEFAULT_GL || 'us',
                 hl: serp_hl || 'en',
@@ -342,7 +361,7 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            model: TEXT_MODEL,
             max_tokens: maxTokensFor(activeContentType),
             temperature: 0.7,
             system: systemPrompt,
@@ -356,6 +375,15 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
     }
 
     const data = await res.json();
+    // Cost instrumentation: capture the real token usage + stop_reason onto the
+    // shared context BEFORE any further processing can throw, so the cost row is
+    // accurate even when a later step (upload, publish) fails. Failed API calls
+    // never reach here and aren't billed — text cost is genuinely 0 for those.
+    if (costCtx) {
+        costCtx.model       = TEXT_MODEL;
+        costCtx.usage       = data?.usage || null;
+        costCtx.stop_reason = data?.stop_reason || null;
+    }
     if (data?.stop_reason === 'max_tokens') {
         // Hit the token ceiling — output is truncated. With per-type max_tokens this
         // should be rare; log loudly so it's visible in Railway rather than shipping
@@ -585,6 +613,7 @@ router.post('/', async (req, res) => {
     // ── Step 2: deduct credits atomically ─────────────────────────────────
     const client = await pool.connect();
     let allocations = null;
+    let usageLogId  = null;
 
     try {
         await client.query('BEGIN');
@@ -596,6 +625,7 @@ router.post('/', async (req, res) => {
         }
 
         allocations = deduction.allocations;
+        usageLogId  = deduction.usage_log_id;
         await client.query('COMMIT');
         creditsCache.invalidate(license_key); // balance changed — next /credits poll reads fresh
         console.log(`[generate] Deducted ${credits} credits across ${allocations.length} batch(es)`);
@@ -615,6 +645,12 @@ router.post('/', async (req, res) => {
     let youtubeVideos = [];
     let articleText = '';
 
+    // Cost instrumentation context — mutated as the pipeline progresses so
+    // whatever provider spend happened before a throw is still captured. The
+    // cost row is attached to THIS attempt's usage_logs row (usageLogId) in
+    // both the success and failure paths below.
+    const costCtx = { model: null, usage: null, stop_reason: null, serpCalls: 0 };
+
     try {
         // Kick off all three independent steps at once. Content is the long pole
         // and is fatal (its rejection must surface), so we start it here and await
@@ -628,7 +664,7 @@ router.post('/', async (req, res) => {
             special_instructions, brand_voice, tone, style_profile,
             content_type, content_type_meta,
             approved_outline, serp_gl, serp_hl,
-        });
+        }, costCtx);
         // Attach a handler immediately. generateContent can reject *before* its first
         // await (a missing config value, a synchronous throw). Because we await the
         // best-effort image/YouTube steps below before awaiting contentPromise, such a
@@ -717,8 +753,8 @@ router.post('/', async (req, res) => {
             // all fail silently and the content lands as a plain post.
             content_type:       activeContentType,
             content_type_meta:  content_type_meta || {},
-            ai_model:           'claude-sonnet-4-6',
-            image_model:        'gpt-image-1.5',
+            ai_model:           TEXT_MODEL,
+            image_model:        IMAGE_MODEL,
             credits_used:       credits,
             execution_time:     Math.round((Date.now() - startTime) / 1000),
             include_youtube:    !!include_youtube,
@@ -755,6 +791,20 @@ router.post('/', async (req, res) => {
         await postToWordPress(domain, publishPayload, process.env.GENERATE_SECRET || '');
         console.log(`[generate] COMPLETE — "${title}" in ${publishPayload.execution_time}s`);
 
+        // ── Cost instrumentation: stamp this attempt's true provider cost ──
+        // Image is only charged when a b64 actually came back (failed image
+        // calls return null and aren't billed). Best-effort by contract.
+        await costLog.attachCost(pool, usageLogId, {
+            model:       costCtx.model,
+            usage:       costCtx.usage,
+            stop_reason: costCtx.stop_reason,
+            image:       imageBase64 ? { model: IMAGE_MODEL, size: IMAGE_SIZE, quality: IMAGE_QUALITY } : null,
+            serpCalls:   costCtx.serpCalls,
+            costEvent:   'generate',
+            succeeded:   true,
+            generationSeconds: publishPayload.execution_time,
+        });
+
     } catch (err) {
         console.error(`[generate] Pipeline failed for "${title}":`, err.message);
         console.error(`[generate] Stack:`, err.stack);
@@ -783,6 +833,24 @@ router.post('/', async (req, res) => {
         } catch (notifyErr) {
             console.error('[generate] Failed to notify WordPress of error:', notifyErr.message);
         }
+
+        // ── Cost instrumentation: the failure path still cost real money ──
+        // The refund above returned the CUSTOMER's credits; it did not refund
+        // what we paid Anthropic/OpenAI/Serper before the throw. Record it as
+        // succeeded=false so the admin's waste metric sees it. costCtx holds
+        // whatever was captured before the failure (tokens null if the
+        // Anthropic call itself failed — those aren't billed). attachCost
+        // never throws (see lib/cost-log.js) — safe inside this catch.
+        await costLog.attachCost(pool, usageLogId, {
+            model:       costCtx.model,
+            usage:       costCtx.usage,
+            stop_reason: costCtx.stop_reason,
+            image:       imageBase64 ? { model: IMAGE_MODEL, size: IMAGE_SIZE, quality: IMAGE_QUALITY } : null,
+            serpCalls:   costCtx.serpCalls,
+            costEvent:   'generate',
+            succeeded:   false,
+            generationSeconds: Math.round((Date.now() - startTime) / 1000),
+        });
     }
 });
 

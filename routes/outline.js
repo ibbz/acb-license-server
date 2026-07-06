@@ -17,6 +17,15 @@
 const express = require('express');
 const router  = express.Router();
 const serp    = require('../lib/serp');
+const { Pool } = require('pg');
+const costLog = require('../lib/cost-log');
+
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+const TEXT_MODEL = 'claude-sonnet-4-6';
 
 // Strip ```json fences and parse, tolerating any preamble/trailing prose.
 function parseJsonLoose(text) {
@@ -39,7 +48,7 @@ async function callClaude(prompt) {
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            model: TEXT_MODEL,
             // Grounded, multi-section outlines (especially from richer Strategist
             // briefs) can exceed a tight ceiling and truncate mid-array, which then
             // surfaces downstream as a confusing "JSON parse" error rather than the
@@ -60,7 +69,8 @@ async function callClaude(prompt) {
     if (!text) throw new Error('Empty response from Anthropic API');
     // Surface truncation explicitly. If the model hit the token ceiling the JSON
     // is incomplete; callers should report that plainly rather than as a parse bug.
-    return { text, truncated: data?.stop_reason === 'max_tokens' };
+    // usage/stop_reason returned for cost instrumentation (lib/cost-log.js).
+    return { text, truncated: data?.stop_reason === 'max_tokens', usage: data?.usage || null, stop_reason: data?.stop_reason || null };
 }
 
 router.post('/', async (req, res) => {
@@ -70,16 +80,44 @@ router.post('/', async (req, res) => {
         return res.status(401).json({ success: false, error: 'Unauthorised' });
     }
 
-    const { keyword, title, serp_gl, serp_hl } = req.body || {};
+    // license_key + domain are sent by plugin builds from 2026-07 onward (the
+    // outline proxy in ai-content-bridge.php) purely for cost attribution.
+    // Older builds omit them — the cost row is still written, unattributed
+    // (license_key_id NULL; see add-cost-columns.sql). Never gate on them.
+    const { keyword, title, serp_gl, serp_hl, license_key, domain } = req.body || {};
     const kw = (keyword || title || '').trim();
     if (!kw) {
         return res.status(400).json({ success: false, error: 'keyword or title is required' });
     }
 
+    // Cost context — the outline is FREE to the user (credits are taken at
+    // generation) but it spends real Anthropic + Serper money on every run.
+    // Recording it is the whole point: pure cost, zero credit revenue.
+    const costCtx = { usage: null, stop_reason: null, serpCalls: 0 };
+    const recordCost = (succeeded) => {
+        // Fire-and-forget: cost logging must never delay or fail the response.
+        costLog.resolveLicenseId(pool, license_key).then(licenseKeyId =>
+            costLog.insertCostRow(pool, {
+                licenseKeyId,
+                domain:      domain || 'unknown',
+                postTitle:   kw,
+                contentType: 'outline',
+                model:       TEXT_MODEL,
+                usage:       costCtx.usage,
+                stop_reason: costCtx.stop_reason,
+                image:       null,
+                serpCalls:   costCtx.serpCalls,
+                costEvent:   'outline',
+                succeeded,
+            })
+        ).catch(() => {}); // insertCostRow already swallows; belt-and-braces
+    };
+
     try {
         // 1. live SERP grounding (null if SERP_API_KEY unset or anything fails)
         let ground = null;
         if (serp.enabled()) {
+            costCtx.serpCalls += 1; // billed on attempt, even if grounding returns null
             ground = await serp.getSerpGrounding(kw, {
                 gl: serp_gl || process.env.SERP_DEFAULT_GL || 'us',
                 hl: serp_hl || 'en',
@@ -88,12 +126,15 @@ router.post('/', async (req, res) => {
 
         // 2. structured outline from Claude
         const prompt  = serp.buildOutlinePrompt(kw, title, ground);
-        const { text: rawText, truncated } = await callClaude(prompt);
+        const { text: rawText, truncated, usage, stop_reason } = await callClaude(prompt);
+        costCtx.usage       = usage;
+        costCtx.stop_reason = stop_reason;
 
         if (truncated) {
             // The model ran out of output budget — the JSON is genuinely incomplete.
             // Report the real cause instead of letting it fall through to a parse error.
             console.warn('[outline] ⚠ TRUNCATED: stop_reason=max_tokens — outline incomplete. Consider a shorter brief or higher budget.');
+            recordCost(false); // paid for a full response we can't use
             return res.status(502).json({ success: false, error: 'The outline was too long to complete. Please retry, or simplify the brief.' });
         }
 
@@ -102,9 +143,11 @@ router.post('/', async (req, res) => {
             outline = parseJsonLoose(rawText);
         } catch (e) {
             console.warn('[outline] JSON parse failed:', e.message);
+            recordCost(false);
             return res.status(502).json({ success: false, error: 'Could not parse outline. Please retry.' });
         }
 
+        recordCost(true);
         return res.json({
             success: true,
             grounded: !!ground,
@@ -116,6 +159,7 @@ router.post('/', async (req, res) => {
         });
     } catch (err) {
         console.error('[outline] failed:', err.message);
+        recordCost(false); // whatever spend happened before the throw (serp, or a billed-but-empty Claude call) is captured
         return res.status(500).json({ success: false, error: 'Outline generation failed' });
     }
 });
