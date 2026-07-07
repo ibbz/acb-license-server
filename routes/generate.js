@@ -29,14 +29,24 @@ const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
 const costLog = require('../lib/cost-log');
 
-// The one text model and image configuration this route uses. Single constants
-// so the API call, the publish payload and the cost row can never disagree.
-// Changing model/size/quality here REQUIRES a matching entry in lib/pricing.js
-// (an unknown key prices as null and logs loudly — see cost instrumentation).
+// The one text model this route uses. The image model/size/quality and the
+// tier-gated policy now live in lib/image-gen.js so /api/generate and
+// /api/regenerate-image share ONE source of truth (the free→mini decision can
+// never diverge between them). Changing the text model here REQUIRES a matching
+// entry in lib/pricing.js (an unknown key prices as null and logs loudly — see
+// cost instrumentation); the same rule holds for the image keys in image-gen.js.
 const TEXT_MODEL  = 'claude-sonnet-4-6';
-const IMAGE_MODEL = 'gpt-image-1.5';
-const IMAGE_SIZE  = '1536x1024';
-const IMAGE_QUALITY = 'medium';
+
+// Image concerns (policy + OpenAI generation + WP upload) are shared with the
+// image-only regeneration route via lib/image-gen.js — extracted verbatim so
+// both routes resolve the identical tier→policy map. IMAGE_MODEL is still used
+// below only as a defensive fallback in the publish payload.
+const {
+    IMAGE_MODEL,
+    imagePolicyFor,
+    generateImage,
+    uploadImageToWordPress,
+} = require('../lib/image-gen');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -118,89 +128,8 @@ async function searchYouTube(title) {
     }
 }
 
-/**
- * Generate a featured image via OpenAI gpt-image-1.5.
- * Returns base64 PNG string or null on failure.
- */
-// Translate a SERP region code (gl) into an image-locale instruction so the
-// model renders region-appropriate scenes — currency, signage, vehicles,
-// architecture — instead of defaulting to US visual clichés (e.g. dollar bills).
-// Returns '' when the code is unset/unknown, so behaviour is unchanged unless a
-// region is explicitly configured (never forces the wrong locale).
-function localeClause(gl) {
-    if (!gl) return '';
-    const place = {
-        gb: 'the United Kingdom', uk: 'the United Kingdom', us: 'the United States',
-        ca: 'Canada', au: 'Australia', ie: 'Ireland', nz: 'New Zealand',
-        in: 'India', za: 'South Africa', sg: 'Singapore', ae: 'the United Arab Emirates',
-        de: 'Germany', fr: 'France', es: 'Spain', it: 'Italy', nl: 'the Netherlands',
-        se: 'Sweden', no: 'Norway', dk: 'Denmark', pt: 'Portugal',
-    }[String(gl).toLowerCase().trim()];
-    if (!place) return '';
-    return ` The scene must be set in ${place}: any currency, signage, vehicles, architecture and everyday details should be appropriate to ${place}, not another country — for example, do not show US dollar bills unless ${place} is the United States.`;
-}
-
-async function generateImage(title, imagePrompt, imageStyle, gl) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-        console.warn('[generate] OPENAI_API_KEY not set — skipping image generation');
-        return null;
-    }
-
-    const styleDescriptions = {
-        professional:  'professional and clean',
-        cinematic:     'cinematic and dramatic with moody lighting',
-        minimalist:    'minimalist and modern with lots of white space',
-        warm:          'warm and inviting with golden tones',
-        corporate:     'corporate and trustworthy, business-like',
-        vintage:       'vintage and nostalgic with retro styling',
-        bold:          'bold and energetic with vivid colours',
-        dreamy:        'soft and dreamy with pastel tones',
-        moody:         'dark and moody with deep shadows',
-        playful:       'bright and playful with vibrant colours',
-        luxury:        'elegant and luxurious with premium styling',
-        futuristic:    'tech-forward and futuristic with neon accents',
-        natural:       'natural and organic with earthy tones',
-        editorial:     'news editorial style, documentary feel',
-        artistic:      'artistic and creative, painterly quality',
-    };
-
-    const styleDesc = styleDescriptions[imageStyle] || 'professional and clean';
-    const loc = localeClause(gl);
-    const prompt = imagePrompt
-        ? `Create a ${styleDesc} featured image for a blog post. ${imagePrompt}. Title: "${title}".${loc} High quality, eye-catching, suitable for a professional blog.`
-        : `Create a ${styleDesc} featured image for a blog post titled: "${title}".${loc} High quality, professional, and eye-catching. No text overlays.`;
-
-    try {
-        const res = await fetch('https://api.openai.com/v1/images/generations', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: IMAGE_MODEL,
-                prompt,
-                n: 1,
-                size: IMAGE_SIZE,
-                quality: IMAGE_QUALITY,
-            }),
-        });
-
-        if (!res.ok) {
-            const err = await res.text();
-            console.warn('[generate] OpenAI image error:', res.status, err);
-            return null;
-        }
-
-        const data = await res.json();
-        // gpt-image-1.5 returns b64_json by default
-        return data?.data?.[0]?.b64_json || null;
-    } catch (err) {
-        console.warn('[generate] Image generation failed:', err.message);
-        return null;
-    }
-}
+// generateImage() and localeClause() now live in lib/image-gen.js (imported at
+// the top of this file) so the image-only regeneration route shares them.
 
 /**
  * Generate article content via Anthropic Claude.
@@ -413,51 +342,8 @@ async function postStage(domain, { title, post_id, stage }, secret) {
 
 /**
  * POST the completed generation back to the WordPress /publish endpoint.
+ * (uploadImageToWordPress now lives in lib/image-gen.js, imported at the top.)
  */
-/**
- * Upload image to WordPress via the plugin's own /upload-image REST endpoint.
- * No WordPress credentials needed — the endpoint is secured by the generate secret.
- * Returns attachment ID or null on failure.
- */
-async function uploadImageToWordPress(domain, imageBase64, title, postId, generateSecret) {
-    if (!imageBase64) return null;
-
-    try {
-        console.log(`[generate] Uploading image via /upload-image endpoint...`);
-
-        const res = await fetch(`https://${domain}/wp-json/ai-content/v1/upload-image`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-generate-secret': generateSecret || '',
-            },
-            body: JSON.stringify({
-                image_b64: imageBase64,
-                title:     title || 'featured-image',
-                post_id:   postId || 0,
-            }),
-        });
-
-        if (!res.ok) {
-            const err = await res.text();
-            console.warn(`[generate] /upload-image failed (${res.status}):`, err.substring(0, 200));
-            return null;
-        }
-
-        const data = await res.json();
-        if (data?.success && data?.attachment_id) {
-            console.log(`[generate] Image uploaded: attachment_id=${data.attachment_id}`);
-            return data.attachment_id;
-        }
-
-        console.warn('[generate] /upload-image unexpected response:', JSON.stringify(data).substring(0, 200));
-        return null;
-    } catch (err) {
-        console.warn('[generate] /upload-image error:', err.message);
-        return null;
-    }
-}
-
 async function postToWordPress(domain, publishPayload, generateSecret, attempt = 1) {
     const url = `https://${domain}/wp-json/ai-content/v1/publish`;
 
@@ -565,6 +451,7 @@ router.post('/', async (req, res) => {
 
     // ── Step 1: validate license + check credits ───────────────────────────
     let licenseId;
+    let licenseTier = 'free'; // resolved from the licence below; drives the image policy
     try {
         const licResult = await pool.query(`
             SELECT lk.id, lk.tier, lk.status,
@@ -589,6 +476,7 @@ router.post('/', async (req, res) => {
         else if (rawTier.includes('pro'))     normTier = 'pro';
         else if (rawTier.includes('starter')) normTier = 'starter';
         lic.tier = normTier;
+        licenseTier = normTier; // handler-scoped copy for the async image policy below
         console.log(`[generate] License tier: raw="${rawTier}" normalised="${normTier}"`);
 
         if (parseInt(lic.credits_remaining) < credits) {
@@ -651,6 +539,10 @@ router.post('/', async (req, res) => {
     // both the success and failure paths below.
     const costCtx = { model: null, usage: null, stop_reason: null, serpCalls: 0 };
 
+    // Resolve the image config for this licence tier once (free -> mini). Used
+    // for the API call AND the cost row, so they can never disagree.
+    const imagePolicy = imagePolicyFor(licenseTier);
+
     try {
         // Kick off all three independent steps at once. Content is the long pole
         // and is fatal (its rejection must surface), so we start it here and await
@@ -677,7 +569,7 @@ router.post('/', async (req, res) => {
         try {
             [ytResults, imgResult] = await Promise.all([
                 include_youtube ? searchYouTube(title).catch(() => []) : Promise.resolve([]),
-                include_image !== false ? generateImage(title, image_prompt, image_style, serp_gl).catch(() => null) : Promise.resolve(null),
+                include_image !== false && imagePolicy.model ? generateImage(title, image_prompt, image_style, serp_gl, imagePolicy).catch(() => null) : Promise.resolve(null),
             ]);
         } catch (parallelErr) {
             console.warn('[generate] Parallel step error (non-fatal):', parallelErr.message);
@@ -754,7 +646,7 @@ router.post('/', async (req, res) => {
             content_type:       activeContentType,
             content_type_meta:  content_type_meta || {},
             ai_model:           TEXT_MODEL,
-            image_model:        IMAGE_MODEL,
+            image_model:        imagePolicy.model || IMAGE_MODEL,
             credits_used:       credits,
             execution_time:     Math.round((Date.now() - startTime) / 1000),
             include_youtube:    !!include_youtube,
@@ -798,7 +690,7 @@ router.post('/', async (req, res) => {
             model:       costCtx.model,
             usage:       costCtx.usage,
             stop_reason: costCtx.stop_reason,
-            image:       imageBase64 ? { model: IMAGE_MODEL, size: IMAGE_SIZE, quality: IMAGE_QUALITY } : null,
+            image:       imageBase64 ? { model: imagePolicy.model, size: imagePolicy.size, quality: imagePolicy.quality } : null,
             serpCalls:   costCtx.serpCalls,
             costEvent:   'generate',
             succeeded:   true,
@@ -845,7 +737,7 @@ router.post('/', async (req, res) => {
             model:       costCtx.model,
             usage:       costCtx.usage,
             stop_reason: costCtx.stop_reason,
-            image:       imageBase64 ? { model: IMAGE_MODEL, size: IMAGE_SIZE, quality: IMAGE_QUALITY } : null,
+            image:       imageBase64 ? { model: imagePolicy.model, size: imagePolicy.size, quality: imagePolicy.quality } : null,
             serpCalls:   costCtx.serpCalls,
             costEvent:   'generate',
             succeeded:   false,

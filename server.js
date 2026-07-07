@@ -133,6 +133,17 @@ const generateLimiter = rateLimit({
 });
 app.use('/api/generate', generateLimiter);
 
+// Image-only regeneration spends real OpenAI money on every call and is the
+// obvious loop to spam, so cap it per-IP too. The 1-credit charge is the primary
+// abuse brake; this is belt-and-braces. Slightly higher ceiling than full
+// generation since an image regen is cheaper and legitimately iterated on.
+const regenerateImageLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Image regeneration rate limit exceeded. Please wait a moment before trying again.' }
+});
+app.use('/api/regenerate-image', regenerateImageLimiter);
+
 // Free registration limiter: max 3 per IP per hour.
 const freeRegLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -163,6 +174,7 @@ app.use('/api/credits',                 require('./routes/credits'));
 app.use('/api/deduct-credit',           require('./routes/deduct-credit'));
 app.use('/api/refund-credits',          require('./routes/refund-credits'));
 app.use('/api/generate',                require('./routes/generate'));
+app.use('/api/regenerate-image',        require('./routes/regenerate-image'));
 app.use('/api/create-checkout-session', require('./routes/create-checkout-session'));
 app.use('/api/admin',                   require('./routes/admin'));
 app.use('/api/admin',                   require('./routes/admin-dashboard'));
