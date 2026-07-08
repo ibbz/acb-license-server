@@ -402,7 +402,7 @@ async function handlePaymentSucceeded(invoice) {
   // billing_reason 'subscription_create', so we skip it here to avoid double-granting.
   if (invoice.billing_reason === 'subscription_cycle') {
     const licRes = await pool.query(
-      `SELECT id, tier, billing_interval FROM license_keys WHERE stripe_customer_id = $1`,
+      `SELECT id, tier, billing_interval, stripe_subscription_id FROM license_keys WHERE stripe_customer_id = $1`,
       [customerId]
     );
     if (licRes.rows.length > 0) {
@@ -421,9 +421,45 @@ async function handlePaymentSucceeded(invoice) {
         `, [lic.id]);
       }
 
+      // ── Deterministic renewal tier (ACB_RENEWAL_TIER_FROM_PRICE_2026_07_08) ──
+      // Grant the tier resolved from the LIVE subscription price, not the stored
+      // DB tier. On a renewal that coincides with a scheduled period-end plan
+      // change (up- or downgrade), Stripe delivers invoice.payment_succeeded and
+      // customer.subscription.updated with NO guaranteed ordering. If the tier
+      // restamp (handleSubscriptionUpdate) hasn't landed yet when we get here, the
+      // DB still reads the OLD tier and we'd grant the wrong allowance for the new
+      // period (e.g. a Pro→Starter downgrade granting 100 instead of 30). The
+      // subscription's current price is race-free — at cycle start it already IS
+      // the new price — so it's the correct source of truth for the allowance.
+      //
+      // Safety: this NEVER reduces robustness. grantTier defaults to lic.tier
+      // (the previous behaviour). We only override when we can positively resolve
+      // a real paid tier from the live price; any failure (no stripe client, no
+      // subscription id, network error, unmappable/free price) falls straight back
+      // to the DB tier. Grant mechanics, dedupeKey and no-rollover sweep are
+      // unchanged — only the tier VALUE passed in can differ.
+      let grantTier = lic.tier;
+      try {
+        if (stripe && lic.stripe_subscription_id) {
+          const liveSub = await stripe.subscriptions.retrieve(lic.stripe_subscription_id);
+          const livePriceId = liveSub && liveSub.items && liveSub.items.data && liveSub.items.data[0]
+            ? liveSub.items.data[0].price && liveSub.items.data[0].price.id
+            : null;
+          const priceTier = tierFromPriceId(livePriceId);
+          if (priceTier && priceTier !== 'free') {
+            if (priceTier !== lic.tier) {
+              console.warn(`[webhook] renewal tier from live price for customer ${customerId}: db=${lic.tier} price=${priceTier} — granting ${priceTier} (scheduled plan-change race avoided)`);
+            }
+            grantTier = priceTier;
+          }
+        }
+      } catch (e) {
+        console.error(`[webhook] live-price tier resolve failed (using db tier '${lic.tier}'):`, e.message);
+      }
+
       await grantSubscriptionCredits({
         licenseId: lic.id,
-        tier:      lic.tier,
+        tier:      grantTier,
         dedupeKey: `invoice:${invoice.id}`,
       });
     } else {

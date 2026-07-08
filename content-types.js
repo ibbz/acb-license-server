@@ -1073,38 +1073,6 @@ ${seoBlock}`;
 ${formattingRules}
 ${seoBlock}`;
 
-        case 'email_course':
-            return `**CONTENT BRIEF:**
-- Course Topic: ${m.course_topic || title}
-- Number of Emails: ${m.num_emails || '5'}
-- Target Audience: ${m.audience || 'Not specified'}
-- Send Frequency: ${m.send_frequency || 'Every 2 days'}
-- Primary Keyword: ${primaryKeyword || title}
-
-**EMAIL COURSE REQUIREMENTS:**
-Write ${m.num_emails || '5'} emails. For each email use this format:
-
----EMAIL [N]---
-SUBJECT: [Subject line]
-PREVIEW: [Preview text]
-
-[Email body]
-
-[CTA]
-
----
-
-Rules for each email:
-1. Email 1: Welcome + overview of what they'll learn + quick win
-2. Final email: Summary + graduation + upsell/next step CTA
-3. Middle emails: One concept per email — teach, example, action step
-4. Keep each email to 200-350 words — respect their inbox
-5. Personal, conversational tone — like a mentor, not a marketer
-6. Each email ends with a clear single action for the reader to take
-7. Build on previous emails — reference what they've learned
-${formattingRules}
-${seoBlock}`;
-
         case 'sop':
             return `**CONTENT BRIEF:**
 - Process: ${m.process_name || title}

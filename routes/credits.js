@@ -105,7 +105,7 @@ router.get('/', async (req, res) => {
     // are served from memory instead of re-querying. One concise log line per
     // cache-miss read replaces the old ~14-line block.
     creditsCache.set(licenseKey, response);
-    console.log(`[credits] ${licenseKey.substring(0, 8)}\u2026 tier=${tier} remaining=${finalCredits} limit=${effectiveLimit} batches=${response.active_batches} (cache miss)`);
+    console.log(`[credits] key=...${licenseKey.slice(-6)} tier=${tier} remaining=${finalCredits} limit=${effectiveLimit} batches=${response.active_batches} (cache miss)`);
 
     res.json(response);
 
