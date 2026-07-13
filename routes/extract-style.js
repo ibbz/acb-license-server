@@ -59,7 +59,7 @@ router.post('/', async (req, res) => {
 
         // Style profiles are Pro/Agency only
         if (!['pro', 'agency'].includes(license.tier)) {
-            return res.status(403).json({ success: false, error: 'Writing Style Profiles are available on Pro and Agency plans.' });
+            return res.status(403).json({ success: false, error: 'AI style extraction is available on the Pro and Agency plans. You can still build style profiles manually or use the built-in writer templates on any plan.' });
         }
 
     } catch (err) {

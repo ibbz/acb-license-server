@@ -27,6 +27,7 @@
  * Env: OPENAI_API_KEY, GENERATE_SECRET, DATABASE_URL.
  */
 
+const { wpFetch } = require('../lib/wp-endpoint');
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
@@ -78,7 +79,7 @@ async function deductOneCredit(client, licenseKey, domain, postTitle) {
  */
 async function appendImageToWordPress(domain, { entry_id, attachment_id, set_active }, generateSecret) {
     try {
-        const res = await fetch(`https://${domain}/wp-json/ai-content/v1/append-image`, {
+        const res = await wpFetch(domain, '/append-image', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -9,7 +9,7 @@
  *  3. Call YouTube Data API — search for up to 3 videos
  *  4. Call OpenAI API    — generate featured image (gpt-image-1.5)
  *  5. Call Anthropic API — generate article content
- *  6. POST results back to WordPress /wp-json/ai-content/v1/publish
+ *  6. POST results back to the plugin /publish route (aicobr/v1, legacy fallback)
  *  7. On any failure after credit deduction — refund credits
  *
  * Environment variables required (set in Railway):
@@ -19,6 +19,7 @@
  *   GENERATE_SECRET   (shared secret WordPress sends to authenticate requests)
  */
 
+const { wpFetch } = require('../lib/wp-endpoint');
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
@@ -330,7 +331,7 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
  */
 async function postStage(domain, { title, post_id, stage }, secret) {
     try {
-        await fetch(`https://${domain}/wp-json/ai-content/v1/generation-stage`, {
+        await wpFetch(domain, '/generation-stage', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', 'x-generate-secret': secret },
             body:    JSON.stringify({ title, post_id: post_id || 0, stage }),
@@ -345,14 +346,12 @@ async function postStage(domain, { title, post_id, stage }, secret) {
  * (uploadImageToWordPress now lives in lib/image-gen.js, imported at the top.)
  */
 async function postToWordPress(domain, publishPayload, generateSecret, attempt = 1) {
-    const url = `https://${domain}/wp-json/ai-content/v1/publish`;
-
-    console.log(`[generate] Posting to WordPress: ${url} (attempt ${attempt})`);
+    console.log(`[generate] Posting to WordPress ${domain} /publish (attempt ${attempt})`);
     console.log(`[generate] Payload keys: ${Object.keys(publishPayload).join(', ')}`);
     console.log(`[generate] content length: ${(publishPayload.content || '').length}, post_id: ${publishPayload.post_id}`);
 
     try {
-        const res = await fetch(url, {
+        const res = await wpFetch(domain, '/publish', {
             method:  'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -489,6 +488,26 @@ router.post('/', async (req, res) => {
                 success: false,
                 error: `The "${activeContentType}" content type is not available on your current plan. Please upgrade to access it.`,
                 code: 'content_type_locked',
+            });
+        }
+
+        // ── Service-side plan enforcement (AICOBR_SERVER_ENFORCED_2026_07_13) ──
+        // As of plugin 2.8.1 the client UI no longer pre-filters these request
+        // params by plan (WP.org Guideline 5 — no local tier gating), so the
+        // service is the single enforcer. Both checks run BEFORE any credit
+        // deduction and return messages the plugin UI surfaces verbatim.
+        if (acf_field_key && !['pro', 'agency'].includes(lic.tier)) {
+            return res.status(403).json({
+                success: false,
+                error: 'ACF Field Targeting is available on the Pro and Agency plans. Remove the ACF target field or upgrade your plan to generate into custom fields.',
+                code: 'acf_locked',
+            });
+        }
+        if (include_youtube && lic.tier === 'free') {
+            return res.status(403).json({
+                success: false,
+                error: 'YouTube video embedding is available on the Starter plan and above. Untick "Include YouTube Video" or upgrade your plan.',
+                code: 'youtube_locked',
             });
         }
 
