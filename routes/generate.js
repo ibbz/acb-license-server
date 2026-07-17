@@ -54,6 +54,13 @@ const pool = new Pool({
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Global cap on concurrent generation pipelines for THIS instance. Normal load
+// never touches it; it only engages during a burst (e.g. an influencer video)
+// to stop hundreds of Claude/OpenAI/Serper calls and base64 images running at
+// once. Tune with GENERATE_MAX_CONCURRENCY; default 10.
+const { ConcurrencyGate } = require('../lib/concurrency-gate');
+const generationGate = new ConcurrencyGate(process.env.GENERATE_MAX_CONCURRENCY || 10);
+
 // Content types that benefit from live SERP grounding (web-facing, keyword-led).
 // Others (quizzes, SOPs, listings, etc.) skip grounding — it would add noise.
 const SERP_GROUNDING_TYPES = new Set([
@@ -562,6 +569,17 @@ router.post('/', async (req, res) => {
     // for the API call AND the cost row, so they can never disagree.
     const imagePolicy = imagePolicyFor(licenseTier);
 
+    // Wait for a free generation slot before the expensive AI fan-out. WordPress
+    // already has its "started" response above, so queuing here is invisible to
+    // the caller — it just means, under a burst, this pipeline starts a moment
+    // later instead of piling onto hundreds of concurrent upstream calls. At
+    // normal load a slot is always free and this resolves instantly.
+    const gateState = generationGate.stats();
+    if (gateState.active >= gateState.limit) {
+        console.log(`[generate] concurrency cap reached (${gateState.active}/${gateState.limit}) — "${title}" queued behind ${gateState.queued} other(s)`);
+    }
+    await generationGate.acquire();
+
     try {
         // Kick off all three independent steps at once. Content is the long pole
         // and is fatal (its rejection must surface), so we start it here and await
@@ -762,6 +780,11 @@ router.post('/', async (req, res) => {
             succeeded:   false,
             generationSeconds: Math.round((Date.now() - startTime) / 1000),
         });
+    } finally {
+        // Always free the slot — success, handled failure, or an unexpected
+        // throw. This is what keeps the gate from leaking permits and stalling
+        // every future generation.
+        generationGate.release();
     }
 });
 
