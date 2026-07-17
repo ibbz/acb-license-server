@@ -475,14 +475,29 @@ async function handlePaymentFailed(invoice) {
 
   // Do NOT suspend on every payment_failed. Stripe fires this event for
   // situations that are NOT a final failure, and suspending on them wrongly
-  // cuts off a paying customer:
-  //   • SCA / 3D Secure: the first invoice can "fail" while it waits for the
-  //     customer to authenticate in their banking app. It succeeds seconds
-  //     later once they approve. (This is what we saw during the smoke test.)
-  //   • Dunning retries: a soft decline on a renewal sets next_payment_attempt
-  //     to a future date — Stripe will retry over the coming days and usually
-  //     succeeds. Suspending on attempt #1 manufactures churn.
+  // cuts off a paying customer. Two independent guards protect against this.
   //
+  // GUARD 1 — only a RENEWAL can ever suspend. (ACB_SUSPEND_GUARD_BILLING_REASON_2026_07_17)
+  //   Suspension means "an active subscriber stopped paying, take their access
+  //   away." That only makes sense for a renewal (billing_reason
+  //   'subscription_cycle'). Every other billing_reason must be ignored here:
+  //     • subscription_create — the FIRST invoice. If it "fails" it's SCA / 3D
+  //       Secure waiting for the customer to authenticate, or an initial
+  //       decline. Either way there is no existing entitlement to suspend; the
+  //       worst case is simply that we never provision. Suspending here is the
+  //       bug that locked out a paying annual customer mid-3DS.
+  //     • subscription_update — a proration/upgrade invoice. The customer still
+  //       holds their prior active plan; a hiccup here must not cut them off.
+  //   next_payment_attempt does NOT catch the SCA first-invoice case, because an
+  //   authentication-pending invoice has no scheduled retry — hence this gate.
+  if (invoice.billing_reason !== 'subscription_cycle') {
+    console.log(
+      `[webhook] payment_failed on ${invoice.billing_reason} for ${customerId} — not a renewal; not suspending.`
+    );
+    return;
+  }
+
+  // GUARD 2 — even on a renewal, don't suspend while dunning is still running.
   // next_payment_attempt is a unix timestamp when another retry is scheduled,
   // or null when Stripe has given up. We only suspend once it's null — i.e.
   // dunning is genuinely exhausted and the customer truly hasn't paid.
