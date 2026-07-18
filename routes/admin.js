@@ -20,6 +20,8 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
+const { logAdminAction, actorFrom } = require('../lib/admin-audit');
+
 // ── Admin auth middleware ──────────────────────────────────────────────────
 
 const requireAdminSecret = (req, res, next) => {
@@ -70,6 +72,8 @@ router.post('/transfer-domain', requireAdminSecret, async (req, res) => {
     );
 
     console.log(`[admin] Domain transfer: ${license_key} → ${normalizedDomain}. Reason: ${reason || 'none given'}`);
+    await logAdminAction({ action: 'transfer_domain', license_key, actor: actorFrom(req), reason,
+      details: { new_domain: normalizedDomain } });
 
     return res.json({
       success:     true,
@@ -117,7 +121,7 @@ router.post('/change-tier', requireAdminSecret, async (req, res) => {
 
   try {
     const current = await pool.query(
-      `SELECT lk.id, lk.tier AS old_tier, fr.email
+      `SELECT lk.id, lk.tier AS old_tier, lk.stripe_subscription_id, lk.status, fr.email
        FROM   license_keys lk
        LEFT   JOIN free_registrations fr ON fr.license_key_id = lk.id
        WHERE  lk.license_key = $1 LIMIT 1`,
@@ -125,7 +129,19 @@ router.post('/change-tier', requireAdminSecret, async (req, res) => {
     );
     if (!current.rows.length) return res.status(404).json({ success: false, error: 'Licence key not found' });
 
-    const { old_tier, email } = current.rows[0];
+    const { old_tier, email, stripe_subscription_id, status } = current.rows[0];
+
+    // Guard: changing the tier of a live Stripe subscriber diverges the DB from
+    // Stripe (until the next webhook overwrites it), doesn't change what they're
+    // billed, and doesn't grant the new tier's credit allowance. Require an
+    // explicit confirm_stripe flag so it can't be done by accident.
+    if (stripe_subscription_id && status === 'active' && !req.body.confirm_stripe) {
+      return res.status(409).json({
+        success: false,
+        code:    'stripe_active',
+        warning: `This licence has an ACTIVE Stripe subscription (${stripe_subscription_id}). Changing the tier here will not change their billing, will diverge from Stripe until the next renewal webhook, and does NOT grant the new tier's credit allowance (use "Add credits" for that). Confirm to override anyway.`,
+      });
+    }
 
     await pool.query(
       `UPDATE license_keys SET tier = $1, updated_at = NOW() WHERE license_key = $2`,
@@ -133,6 +149,8 @@ router.post('/change-tier', requireAdminSecret, async (req, res) => {
     );
 
     console.log(`[admin/change-tier] ${license_key} | ${old_tier} → ${tier} | ${email || 'unknown'} | ${reason || 'no reason'}`);
+    await logAdminAction({ action: 'change_tier', license_key, actor: actorFrom(req), reason,
+      details: { old_tier, new_tier: tier, had_stripe_sub: !!stripe_subscription_id, overrode_stripe: !!req.body.confirm_stripe } });
 
     return res.json({
       success:     true,

@@ -27,6 +27,10 @@ const REAL_LICENCE_IDS = `SELECT id FROM license_keys WHERE NOT is_test`;
 const EXCL_TEST      = `license_key_id IN (${REAL_LICENCE_IDS})`;                              // usage / count queries
 const EXCL_TEST_COGS = `(license_key_id IS NULL OR license_key_id IN (${REAL_LICENCE_IDS}))`; // cost queries: keep unattributed COGS
 
+const { logAdminAction, actorFrom } = require('../lib/admin-audit');
+const creditsCache = require('../lib/credits-cache');
+const { sendVerificationEmail } = require('./register-free');
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 const auth = (req, res, next) => {
     if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
@@ -516,6 +520,8 @@ router.post('/add-credits', auth, async (req, res) => {
             VALUES ($1, $2, $2, NOW(), NOW() + INTERVAL '1 year', $3)
         `, [lk.rows[0].id, parseInt(credits), `admin_grant: ${reason || 'manual'}`]);
         console.log(`[admin] Added ${credits} credits to ${license_key}. Reason: ${reason}`);
+        await logAdminAction({ action: 'add_credits', license_key, actor: actorFrom(req), reason,
+            details: { credits: parseInt(credits) } });
         return res.json({ success: true, message: `${credits} credits added to ${license_key}.` });
     } catch (err) {
         return res.status(500).json({ success: false, error: err.message });
@@ -589,6 +595,8 @@ router.post('/create-beta-license', auth, async (req, res) => {
         await client.query('COMMIT');
 
         console.log(`[admin] Beta license created: ${licenseKey} | ${normalizedEmail} | ${planTier} | ${creditCount} credits`);
+        await logAdminAction({ action: 'create_beta', license_key: licenseKey, actor: actorFrom(req), reason: req.body.notes || null,
+            details: { email: normalizedEmail, tier: planTier, credits: creditCount } });
 
         return res.json({
             success:     true,
@@ -672,6 +680,8 @@ router.post('/delete-user', auth, async (req, res) => {
         await client.query('COMMIT');
 
         console.log(`[admin/delete-user] Cancelled: ${lk.license_key} | ${lk.email} | tier: ${lk.tier}`);
+        await logAdminAction({ action: 'delete_user', license_key: lk.license_key, actor: actorFrom(req), reason: req.body.reason || null,
+            details: { email: lk.email, tier: lk.tier } });
 
         return res.json({
             success:     true,
@@ -747,6 +757,7 @@ router.post('/revoke-licence', auth, async (req, res) => {
         await client.query('COMMIT');
 
         console.log(`[admin/revoke-licence] Revoked: ${license_key} | ${lk.email} | reason: ${reason || 'none'}`);
+        await logAdminAction({ action: 'revoke', license_key, actor: actorFrom(req), reason, details: { email: lk.email } });
 
         return res.json({
             success:     true,
@@ -922,6 +933,7 @@ router.post('/reinstate-user', auth, async (req, res) => {
         await client.query('COMMIT');
 
         console.log(`[admin/reinstate-user] Reinstated: ${license_key} | ${lk.email}`);
+        await logAdminAction({ action: 'reinstate', license_key, actor: actorFrom(req), reason: req.body.reason || null, details: { email: lk.email } });
 
         return res.json({
             success:     true,
@@ -1053,9 +1065,107 @@ router.post('/set-test', auth, async (req, res) => {
             [license_key, is_test]
         );
         if (r.rows.length === 0) return res.status(404).json({ success: false, error: 'Licence not found.' });
+        await logAdminAction({ action: 'set_test', license_key, actor: actorFrom(req),
+            reason: is_test ? 'flagged as test' : 'marked as real', details: { is_test } });
         return res.json({ success: true, license_key: r.rows[0].license_key, is_test: r.rows[0].is_test });
     } catch (err) {
         console.error('[admin/set-test]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── POST /api/admin/adjust-credits ────────────────────────────────────────────
+// Grant (positive credits) or claw back (negative credits). Grants add a 1-year
+// batch; deductions reduce non-expired batches soonest-expiry-first, capped at
+// the live balance. Audit-logged. (Legacy /add-credits is kept for back-compat.)
+router.post('/adjust-credits', auth, async (req, res) => {
+    const { license_key, credits, reason } = req.body;
+    const delta = parseInt(credits);
+    if (!license_key || !delta || Number.isNaN(delta)) {
+        return res.status(400).json({ success: false, error: 'license_key and a non-zero integer credits are required.' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const lk = await client.query(`SELECT id FROM license_keys WHERE license_key = $1`, [license_key]);
+        if (!lk.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, error: 'Licence not found.' }); }
+        const licenseId = lk.rows[0].id;
+        let applied = 0;
+
+        if (delta > 0) {
+            await client.query(
+                `INSERT INTO credit_batches (license_key_id, credits_issued, credits_remaining, issued_date, expiry_date, notes)
+                 VALUES ($1, $2, $2, NOW(), NOW() + INTERVAL '1 year', $3)`,
+                [licenseId, delta, `admin_adjust:+${delta}: ${reason || 'manual'}`]);
+            applied = delta;
+        } else {
+            let toRemove = -delta;
+            const batches = await client.query(
+                `SELECT id, credits_remaining FROM credit_batches
+                 WHERE license_key_id = $1 AND expiry_date > CURRENT_DATE AND credits_remaining > 0
+                 ORDER BY expiry_date ASC`, [licenseId]);
+            for (const b of batches.rows) {
+                if (toRemove <= 0) break;
+                const take = Math.min(toRemove, b.credits_remaining);
+                await client.query(`UPDATE credit_batches SET credits_remaining = credits_remaining - $1 WHERE id = $2`, [take, b.id]);
+                toRemove -= take; applied -= take;
+            }
+        }
+        await client.query('COMMIT');
+        creditsCache.invalidate(license_key);
+        await logAdminAction({ action: delta > 0 ? 'add_credits' : 'remove_credits', license_key, actor: actorFrom(req), reason,
+            details: { requested: delta, applied } });
+        return res.json({ success: true, applied,
+            message: `${applied >= 0 ? 'Added' : 'Removed'} ${Math.abs(applied)} credit(s)${(delta < 0 && -applied < -delta) ? ' (capped at balance)' : ''}.` });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[admin/adjust-credits]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally { client.release(); }
+});
+
+// ── POST /api/admin/resend-verification ───────────────────────────────────────
+// Re-send the email-verification link for a free licence (stuck-user support).
+router.post('/resend-verification', auth, async (req, res) => {
+    const { license_key } = req.body;
+    if (!license_key) return res.status(400).json({ success: false, error: 'license_key is required.' });
+    const client = await pool.connect();
+    try {
+        const lk = await client.query(
+            `SELECT lk.id, lk.email_verified, u.email
+             FROM license_keys lk JOIN users u ON u.id = lk.user_id
+             WHERE lk.license_key = $1`, [license_key]);
+        if (!lk.rows.length) return res.status(404).json({ success: false, error: 'Licence not found.' });
+        const row = lk.rows[0];
+        if (row.email_verified) return res.status(400).json({ success: false, error: 'This licence is already verified.' });
+        await sendVerificationEmail(client, row.id, row.email, license_key);
+        await logAdminAction({ action: 'resend_verification', license_key, actor: actorFrom(req), details: { email: row.email } });
+        return res.json({ success: true, message: `Verification email re-sent to ${row.email}.` });
+    } catch (err) {
+        console.error('[admin/resend-verification]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally { client.release(); }
+});
+
+// ── GET /api/admin/audit-log ──────────────────────────────────────────────────
+// Recent admin actions, newest first. ?license_key= filters to one licence;
+// ?limit (default 50, max 200).
+router.get('/audit-log', auth, async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || 50), 1), 200);
+    const lkFilter = req.query.license_key || null;
+    try {
+        const params = [];
+        let where = '';
+        if (lkFilter) { params.push(lkFilter); where = 'WHERE license_key = $1'; }
+        params.push(limit);
+        const r = await pool.query(
+            `SELECT action, license_key, actor, reason, details, created_at
+             FROM admin_audit_log ${where}
+             ORDER BY created_at DESC
+             LIMIT $${params.length}`, params);
+        return res.json({ success: true, entries: r.rows });
+    } catch (err) {
+        console.error('[admin/audit-log]', err.message);
         return res.status(500).json({ success: false, error: err.message });
     }
 });
