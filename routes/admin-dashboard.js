@@ -276,6 +276,7 @@ router.get('/users', auth, async (req, res) => {
                 lk.status,
                 lk.license_key,
                 lk.email_verified,
+                lk.is_test,
                 lk.registered_domain,
                 lk.created_at              AS license_created,
                 COALESCE(cbs.credits_issued, 0)                         AS credits_issued,
@@ -1001,6 +1002,28 @@ router.get('/costs', auth, async (req, res) => {
     }
 });
 
+// ── POST /api/admin/set-test ──────────────────────────────────────────────────
+// Flag or unflag a licence as a test account. Flagged licences keep all their
+// data but are excluded from the Launch Monitor's real-traffic metrics.
+router.post('/set-test', auth, async (req, res) => {
+    const { license_key, is_test } = req.body;
+    if (!license_key || typeof is_test !== 'boolean') {
+        return res.status(400).json({ success: false, error: 'license_key and a boolean is_test are required.' });
+    }
+    try {
+        const r = await pool.query(
+            `UPDATE license_keys SET is_test = $2 WHERE license_key = $1
+             RETURNING license_key, is_test`,
+            [license_key, is_test]
+        );
+        if (r.rows.length === 0) return res.status(404).json({ success: false, error: 'Licence not found.' });
+        return res.json({ success: true, license_key: r.rows[0].license_key, is_test: r.rows[0].is_test });
+    } catch (err) {
+        console.error('[admin/set-test]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ── GET /api/admin/launch ─────────────────────────────────────────────────────
 // The real-time launch funnel — powers the Launch Monitor tab in one call.
 // Sources the launch-plan Phase 0 §1.3 metrics + the §8 cost/abuse tripwires.
@@ -1014,20 +1037,25 @@ router.get('/launch', auth, async (req, res) => {
     try {
         const [funnel, verif, ttf, cost, wReg, wAct, dBurn, multiDom, ips, bundles] = await Promise.all([
             pool.query(`
-                WITH r AS (SELECT COUNT(*) n FROM free_registrations),
-                     a AS (SELECT COUNT(DISTINCT license_key_id) n FROM usage_logs WHERE credits_used > 0),
-                     p AS (SELECT COUNT(*) n FROM license_keys WHERE lower(tier) <> 'free' AND status = 'active')
+                WITH r AS (SELECT COUNT(*) n FROM free_registrations fr
+                           JOIN license_keys lk ON lk.id = fr.license_key_id WHERE NOT lk.is_test),
+                     a AS (SELECT COUNT(DISTINCT ul.license_key_id) n FROM usage_logs ul
+                           JOIN license_keys lk ON lk.id = ul.license_key_id
+                           WHERE ul.credits_used > 0 AND NOT lk.is_test),
+                     p AS (SELECT COUNT(*) n FROM license_keys
+                           WHERE lower(tier) <> 'free' AND status = 'active' AND NOT is_test)
                 SELECT r.n AS registrations, a.n AS activated, p.n AS paid FROM r, a, p
             `),
             pool.query(`
                 SELECT COUNT(*) AS free_licences,
                        COUNT(*) FILTER (WHERE email_verified) AS verified
-                FROM license_keys WHERE lower(tier) = 'free'
+                FROM license_keys WHERE lower(tier) = 'free' AND NOT is_test
             `),
             pool.query(`
                 WITH fg AS (
                     SELECT fr.license_key_id, fr.created_at AS reg, MIN(ul.created_at) AS firstgen
                     FROM free_registrations fr
+                    JOIN license_keys lk ON lk.id = fr.license_key_id AND NOT lk.is_test
                     JOIN usage_logs ul ON ul.license_key_id = fr.license_key_id AND ul.credits_used > 0
                     GROUP BY fr.license_key_id, fr.created_at)
                 SELECT COUNT(*) AS activated_licences,
@@ -1043,16 +1071,19 @@ router.get('/launch', auth, async (req, res) => {
                     COALESCE(SUM(ul.total_cost_usd) FILTER (WHERE ul.created_at >= date_trunc('day', NOW()) - INTERVAL '1 day'
                                                               AND ul.created_at <  date_trunc('day', NOW())), 0) AS burn_yesterday
                 FROM usage_logs ul LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
-                WHERE ul.total_cost_usd IS NOT NULL
+                WHERE ul.total_cost_usd IS NOT NULL AND lk.is_test IS NOT TRUE
             `),
             pool.query(`
-                SELECT to_char(date_trunc('week', created_at), 'YYYY-MM-DD') AS week, COUNT(*) AS registrations
-                FROM free_registrations
-                WHERE created_at >= NOW() - INTERVAL '12 weeks'
+                SELECT to_char(date_trunc('week', fr.created_at), 'YYYY-MM-DD') AS week, COUNT(*) AS registrations
+                FROM free_registrations fr JOIN license_keys lk ON lk.id = fr.license_key_id
+                WHERE fr.created_at >= NOW() - INTERVAL '12 weeks' AND NOT lk.is_test
                 GROUP BY 1 ORDER BY 1
             `),
             pool.query(`
-                WITH fg AS (SELECT license_key_id, MIN(created_at) AS firstgen FROM usage_logs WHERE credits_used > 0 GROUP BY license_key_id)
+                WITH fg AS (SELECT ul.license_key_id, MIN(ul.created_at) AS firstgen
+                            FROM usage_logs ul JOIN license_keys lk ON lk.id = ul.license_key_id
+                            WHERE ul.credits_used > 0 AND NOT lk.is_test
+                            GROUP BY ul.license_key_id)
                 SELECT to_char(date_trunc('week', firstgen), 'YYYY-MM-DD') AS week, COUNT(*) AS activations
                 FROM fg WHERE firstgen >= NOW() - INTERVAL '12 weeks' GROUP BY 1 ORDER BY 1
             `),
@@ -1063,20 +1094,22 @@ router.get('/launch', auth, async (req, res) => {
                        COUNT(*) FILTER (WHERE ul.cost_event = 'generate') AS generations
                 FROM usage_logs ul LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
                 WHERE ul.created_at >= NOW() - INTERVAL '14 days' AND ul.total_cost_usd IS NOT NULL
+                  AND lk.is_test IS NOT TRUE
                 GROUP BY 1 ORDER BY 1
             `),
             pool.query(`
                 SELECT lk.license_key, COUNT(DISTINCT ul.domain) AS domains
                 FROM usage_logs ul JOIN license_keys lk ON lk.id = ul.license_key_id
-                WHERE lower(lk.tier) = 'free' AND ul.credits_used > 0
+                WHERE lower(lk.tier) = 'free' AND ul.credits_used > 0 AND NOT lk.is_test
                 GROUP BY lk.license_key
                 HAVING COUNT(DISTINCT ul.domain) > 1
                 ORDER BY domains DESC LIMIT 10
             `),
             pool.query(`
-                SELECT registered_ip, COUNT(*) AS registrations
-                FROM free_registrations
-                GROUP BY registered_ip HAVING COUNT(*) > 2
+                SELECT fr.registered_ip, COUNT(*) AS registrations
+                FROM free_registrations fr JOIN license_keys lk ON lk.id = fr.license_key_id
+                WHERE NOT lk.is_test
+                GROUP BY fr.registered_ip HAVING COUNT(*) > 2
                 ORDER BY registrations DESC LIMIT 10
             `),
             // Credit-bundle purchases (one-time revenue, invisible to MRR). Bundle
@@ -1095,7 +1128,7 @@ router.get('/launch', auth, async (req, res) => {
                     COUNT(*) FILTER (WHERE cb.credits_issued NOT IN (20, 50, 120)) AS unknown_priced
                 FROM credit_batches cb
                 JOIN license_keys lk ON lk.id = cb.license_key_id
-                WHERE cb.notes LIKE 'stripe_session:%' OR cb.notes LIKE 'bundle:%'
+                WHERE (cb.notes LIKE 'stripe_session:%' OR cb.notes LIKE 'bundle:%') AND NOT lk.is_test
                 GROUP BY 1
             `),
         ]);
