@@ -460,13 +460,13 @@ router.post('/', async (req, res) => {
     let licenseTier = 'free'; // resolved from the licence below; drives the image policy
     try {
         const licResult = await pool.query(`
-            SELECT lk.id, lk.tier, lk.status,
+            SELECT lk.id, lk.tier, lk.status, lk.registered_domain,
                    COALESCE(SUM(cb.credits_remaining), 0) AS credits_remaining
             FROM license_keys lk
             LEFT JOIN credit_batches cb
                 ON cb.license_key_id = lk.id AND cb.expiry_date > CURRENT_DATE
             WHERE lk.license_key = $1 AND lk.status = 'active'
-            GROUP BY lk.id, lk.tier, lk.status
+            GROUP BY lk.id, lk.tier, lk.status, lk.registered_domain
         `, [license_key]);
 
         if (licResult.rows.length === 0) {
@@ -484,6 +484,41 @@ router.post('/', async (req, res) => {
         lic.tier = normTier;
         licenseTier = normTier; // handler-scoped copy for the async image policy below
         console.log(`[generate] License tier: raw="${rawTier}" normalised="${normTier}"`);
+
+        // ── Free-tier domain lock enforcement (ACB_FREE_DOMAIN_LOCK_GENERATE_2026_07_18) ──
+        // The lock is written at email verification (verify-email.js) but was previously
+        // enforced ONLY in /api/validate — a route the shipped plugin never calls — so a
+        // free key generated on any domain. Enforce it here on the real generation path,
+        // mirroring validate.js: first use locks, thereafter the domain must match.
+        // Free tier only; paid keys are not domain-locked. Runs BEFORE any credit
+        // deduction, so a rejection never costs the customer a credit or a refund.
+        // Kill-switch: set env ACB_FREE_DOMAIN_LOCK=off to disable without a redeploy.
+        if (lic.tier === 'free' && process.env.ACB_FREE_DOMAIN_LOCK !== 'off') {
+            const incomingDomain = (domain || '').trim().toLowerCase()
+                .replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+            if (!lic.registered_domain) {
+                // First use — lock now (backstop; verify-email normally sets this at
+                // activation). The WHERE ... IS NULL guard makes a concurrent first
+                // generate idempotent rather than racing two writes.
+                if (incomingDomain) {
+                    await pool.query(
+                        `UPDATE license_keys
+                         SET registered_domain = $2, domain_locked_at = NOW()
+                         WHERE id = $1 AND registered_domain IS NULL`,
+                        [lic.id, incomingDomain]
+                    );
+                    console.log(`[generate] Free licence domain locked on first use: ...${license_key.slice(-6)} -> ${incomingDomain}`);
+                }
+            } else if (lic.registered_domain.toLowerCase() !== incomingDomain) {
+                console.warn(`[generate] DOMAIN_MISMATCH: key ...${license_key.slice(-6)} locked to ${lic.registered_domain}, request from ${incomingDomain || '(none)'}`);
+                return res.status(403).json({
+                    success: false,
+                    error:  `This free licence is registered to ${lic.registered_domain}. To move it to a new domain please contact support@aicontentbridge.com.`,
+                    code:   'DOMAIN_MISMATCH',
+                });
+            }
+        }
 
         if (parseInt(lic.credits_remaining) < credits) {
             return res.status(402).json({ success: false, error: 'Insufficient credits', credits_remaining: parseInt(lic.credits_remaining) });
