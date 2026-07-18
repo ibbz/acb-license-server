@@ -981,4 +981,156 @@ router.get('/costs', auth, async (req, res) => {
     }
 });
 
+// ── GET /api/admin/launch ─────────────────────────────────────────────────────
+// The real-time launch funnel — powers the Launch Monitor tab in one call.
+// Sources the launch-plan Phase 0 §1.3 metrics + the §8 cost/abuse tripwires.
+// Definitions:
+//   registration = a free_registrations row (the true install→signup proxy)
+//   activation   = a licence with >=1 usage_logs row where credits_used > 0
+//                  (a real credit-spending generation, not a validation/cost row)
+//   paid         = license_keys with lower(tier) <> 'free' AND status = 'active'
+// tier is lower()-compared because the DB may hold 'Agency'/'AGENCY' etc.
+router.get('/launch', auth, async (req, res) => {
+    try {
+        const [funnel, verif, ttf, cost, wReg, wAct, dBurn, multiDom, ips] = await Promise.all([
+            pool.query(`
+                WITH r AS (SELECT COUNT(*) n FROM free_registrations),
+                     a AS (SELECT COUNT(DISTINCT license_key_id) n FROM usage_logs WHERE credits_used > 0),
+                     p AS (SELECT COUNT(*) n FROM license_keys WHERE lower(tier) <> 'free' AND status = 'active')
+                SELECT r.n AS registrations, a.n AS activated, p.n AS paid FROM r, a, p
+            `),
+            pool.query(`
+                SELECT COUNT(*) AS free_licences,
+                       COUNT(*) FILTER (WHERE email_verified) AS verified
+                FROM license_keys WHERE lower(tier) = 'free'
+            `),
+            pool.query(`
+                WITH fg AS (
+                    SELECT fr.license_key_id, fr.created_at AS reg, MIN(ul.created_at) AS firstgen
+                    FROM free_registrations fr
+                    JOIN usage_logs ul ON ul.license_key_id = fr.license_key_id AND ul.credits_used > 0
+                    GROUP BY fr.license_key_id, fr.created_at)
+                SELECT COUNT(*) AS activated_licences,
+                       ROUND(AVG(EXTRACT(EPOCH FROM (firstgen - reg))/3600)::numeric, 1) AS avg_hours,
+                       ROUND((percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (firstgen - reg))/3600))::numeric, 1) AS median_hours,
+                       ROUND((percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (firstgen - reg))/3600))::numeric, 1) AS p90_hours
+                FROM fg
+            `),
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(ul.total_cost_usd) FILTER (WHERE lower(lk.tier) = 'free'), 0) AS free_tier_cost_all,
+                    COALESCE(SUM(ul.total_cost_usd) FILTER (WHERE ul.created_at >= date_trunc('day', NOW())), 0) AS burn_today,
+                    COALESCE(SUM(ul.total_cost_usd) FILTER (WHERE ul.created_at >= date_trunc('day', NOW()) - INTERVAL '1 day'
+                                                              AND ul.created_at <  date_trunc('day', NOW())), 0) AS burn_yesterday
+                FROM usage_logs ul LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
+                WHERE ul.total_cost_usd IS NOT NULL
+            `),
+            pool.query(`
+                SELECT to_char(date_trunc('week', created_at), 'YYYY-MM-DD') AS week, COUNT(*) AS registrations
+                FROM free_registrations
+                WHERE created_at >= NOW() - INTERVAL '12 weeks'
+                GROUP BY 1 ORDER BY 1
+            `),
+            pool.query(`
+                WITH fg AS (SELECT license_key_id, MIN(created_at) AS firstgen FROM usage_logs WHERE credits_used > 0 GROUP BY license_key_id)
+                SELECT to_char(date_trunc('week', firstgen), 'YYYY-MM-DD') AS week, COUNT(*) AS activations
+                FROM fg WHERE firstgen >= NOW() - INTERVAL '12 weeks' GROUP BY 1 ORDER BY 1
+            `),
+            pool.query(`
+                SELECT to_char(date_trunc('day', ul.created_at), 'YYYY-MM-DD') AS day,
+                       ROUND(SUM(ul.total_cost_usd), 2) AS total_cost_usd,
+                       ROUND(COALESCE(SUM(ul.total_cost_usd) FILTER (WHERE lower(lk.tier) = 'free'), 0), 2) AS free_tier_cost_usd,
+                       COUNT(*) FILTER (WHERE ul.cost_event = 'generate') AS generations
+                FROM usage_logs ul LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
+                WHERE ul.created_at >= NOW() - INTERVAL '14 days' AND ul.total_cost_usd IS NOT NULL
+                GROUP BY 1 ORDER BY 1
+            `),
+            pool.query(`
+                SELECT lk.license_key, COUNT(DISTINCT ul.domain) AS domains
+                FROM usage_logs ul JOIN license_keys lk ON lk.id = ul.license_key_id
+                WHERE lower(lk.tier) = 'free' AND ul.credits_used > 0
+                GROUP BY lk.license_key
+                HAVING COUNT(DISTINCT ul.domain) > 1
+                ORDER BY domains DESC LIMIT 10
+            `),
+            pool.query(`
+                SELECT registered_ip, COUNT(*) AS registrations
+                FROM free_registrations
+                GROUP BY registered_ip HAVING COUNT(*) > 2
+                ORDER BY registrations DESC LIMIT 10
+            `),
+        ]);
+
+        const f = funnel.rows[0];
+        const registrations = parseInt(f.registrations) || 0;
+        const activated     = parseInt(f.activated) || 0;
+        const paid          = parseInt(f.paid) || 0;
+
+        const v = verif.rows[0];
+        const freeLic  = parseInt(v.free_licences) || 0;
+        const verified = parseInt(v.verified) || 0;
+
+        const c = cost.rows[0];
+        const freeCostAll = parseFloat(c.free_tier_cost_all) || 0;
+        const burnToday   = parseFloat(c.burn_today) || 0;
+
+        const pct1 = (num, den) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
+        const activationPct = pct1(activated, registrations);
+        const r2p = registrations > 0 ? Math.round((paid / registrations) * 10000) / 100 : 0;
+
+        // Gate bands (launch plan §0/§10). The <50-registrations "early" guard stops
+        // a day-2 zero-paid reading as "broken" — the plan judges this at ~90 days.
+        let gate;
+        if (registrations < 50) gate = 'early';
+        else if (r2p < 0.5)     gate = 'broken';
+        else if (r2p < 3)       gate = 'optimise';
+        else                    gate = 'ship';
+
+        const costPerSignup = registrations > 0 ? Math.round((freeCostAll / registrations) * 10000) / 10000 : 0;
+        const num = (x) => x !== null && x !== undefined ? parseFloat(x) : null;
+
+        return res.json({
+            success: true,
+            funnel: {
+                registrations, activated, paid,
+                activation_pct: activationPct,
+                registered_to_paid_pct: r2p,
+                gate,
+            },
+            verification: {
+                free_licences: freeLic, verified,
+                verified_pct: pct1(verified, freeLic),
+            },
+            ttf: {
+                activated_licences: parseInt(ttf.rows[0].activated_licences) || 0,
+                avg_hours:    num(ttf.rows[0].avg_hours),
+                median_hours: num(ttf.rows[0].median_hours),
+                p90_hours:    num(ttf.rows[0].p90_hours),
+            },
+            cost: {
+                free_tier_cost_all: Math.round(freeCostAll * 100) / 100,
+                cost_per_signup: costPerSignup,
+                burn_today: Math.round(burnToday * 100) / 100,
+                burn_yesterday: Math.round((parseFloat(c.burn_yesterday) || 0) * 100) / 100,
+                tripwire_usd: 5,
+                over_tripwire: burnToday > 5,
+            },
+            series: {
+                weekly_registrations: wReg.rows,
+                weekly_activations:   wAct.rows,
+                daily_burn:           dBurn.rows,
+            },
+            alerts: {
+                multi_domain_free_keys:  multiDom.rows.length,
+                repeat_ip_registrations: ips.rows.length,
+                top_multi_domain: multiDom.rows,
+                top_ips: ips.rows,
+            },
+        });
+    } catch (err) {
+        console.error('[admin/launch]', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
