@@ -19,6 +19,14 @@ const pool   = new Pool({
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
+// ── Test-account exclusion (is_test on license_keys) ──────────────────────────
+// Every stats endpoint below filters these out so real-traffic numbers aren't
+// polluted by founder / QA accounts. The All Users page deliberately still shows
+// them (with a TEST badge) — that's account management, not a metric.
+const REAL_LICENCE_IDS = `SELECT id FROM license_keys WHERE NOT is_test`;
+const EXCL_TEST      = `license_key_id IN (${REAL_LICENCE_IDS})`;                              // usage / count queries
+const EXCL_TEST_COGS = `(license_key_id IS NULL OR license_key_id IN (${REAL_LICENCE_IDS}))`; // cost queries: keep unattributed COGS
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 const auth = (req, res, next) => {
     if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
@@ -46,6 +54,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 lk.status,
                 COUNT(*) as count
             FROM license_keys lk
+            WHERE NOT lk.is_test
             GROUP BY lk.tier, lk.status
         `);
 
@@ -58,6 +67,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COUNT(*) FILTER (WHERE lk.created_at >= NOW() - INTERVAL '30 days'
                     AND lk.tier != 'free') AS paid_this_month
             FROM license_keys lk
+            WHERE NOT lk.is_test
         `);
 
         // Credits stats
@@ -68,6 +78,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COALESCE(SUM(credits_issued - credits_remaining), 0) AS total_consumed
             FROM credit_batches
             WHERE expiry_date > CURRENT_DATE
+              AND ${EXCL_TEST}
         `);
 
         // Usage this month
@@ -86,6 +97,7 @@ router.get('/dashboard', auth, async (req, res) => {
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
               AND (cost_event IS NULL OR cost_event IN ('generate', 'strategist_plan'))
+              AND ${EXCL_TEST}
         `);
 
         // Daily signups last 30 days for sparkline
@@ -96,6 +108,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COUNT(*) FILTER (WHERE tier != 'free') AS paid_count
             FROM license_keys
             WHERE created_at >= NOW() - INTERVAL '30 days'
+              AND NOT is_test
             GROUP BY DATE(created_at)
             ORDER BY day
         `);
@@ -110,6 +123,7 @@ router.get('/dashboard', auth, async (req, res) => {
             WHERE created_at >= NOW() - INTERVAL '30 days'
               AND post_title != 'VALIDATION_CHECK'
               AND (cost_event IS NULL OR cost_event IN ('generate', 'strategist_plan'))
+              AND ${EXCL_TEST}
             GROUP BY DATE(created_at)
             ORDER BY day
         `);
@@ -121,6 +135,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COUNT(*) FILTER (WHERE tier != 'free') AS paid_users
             FROM license_keys
             WHERE status = 'active'
+              AND NOT is_test
         `);
 
         // Email verification rate for free tier
@@ -130,6 +145,7 @@ router.get('/dashboard', auth, async (req, res) => {
                 COUNT(*) FILTER (WHERE email_verified = true) AS verified
             FROM license_keys
             WHERE tier = 'free'
+              AND NOT is_test
         `);
 
         // ── Real provider cost (cost instrumentation, 2026-07) ────────────
@@ -150,6 +166,7 @@ router.get('/dashboard', auth, async (req, res) => {
                                    AND total_cost_usd IS NOT NULL)                                       AS priced_rows_this_month
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
+              AND ${EXCL_TEST_COGS}
         `);
         const rc = realCost.rows[0];
         const costTotal          = parseFloat(rc.cost_total) || 0;
@@ -177,8 +194,14 @@ router.get('/dashboard', auth, async (req, res) => {
         let stripeMrr = null;
         if (stripe) {
             try {
+                // Exclude test-account subscriptions (their stripe_subscription_id).
+                const testSubs = await pool.query(
+                    `SELECT stripe_subscription_id FROM license_keys
+                     WHERE is_test AND stripe_subscription_id IS NOT NULL`);
+                const testSubIds = new Set(testSubs.rows.map(r => r.stripe_subscription_id));
                 const subs = await stripe.subscriptions.list({ status: 'active', limit: 100 });
                 stripeMrr = subs.data.reduce((sum, sub) => {
+                    if (testSubIds.has(sub.id)) return sum;   // skip founder / QA test subscriptions
                     const monthly = sub.items.data.reduce((s, item) => {
                         const price = item.price;
                         const amount = price.unit_amount / 100;
@@ -351,6 +374,7 @@ router.get('/analytics', auth, async (req, res) => {
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
               AND created_at >= NOW() - INTERVAL '90 days'
+              AND ${EXCL_TEST}
             GROUP BY COALESCE(content_type, 'blog_post')
             ORDER BY total DESC
         `);
@@ -363,6 +387,7 @@ router.get('/analytics', auth, async (req, res) => {
             FROM usage_logs
             WHERE style_profile_used IS NOT NULL
               AND post_title != 'VALIDATION_CHECK'
+              AND ${EXCL_TEST}
             GROUP BY style_profile_used
             ORDER BY uses DESC
             LIMIT 20
@@ -383,6 +408,7 @@ router.get('/analytics', auth, async (req, res) => {
             JOIN license_keys lk ON lk.user_id = u.id
             JOIN usage_logs ul ON ul.license_key_id = lk.id
             WHERE ul.post_title != 'VALIDATION_CHECK'
+              AND NOT lk.is_test
             GROUP BY u.id, u.email, u.name, lk.tier, lk.registered_domain
             ORDER BY total_generations DESC
             LIMIT 20
@@ -398,6 +424,7 @@ router.get('/analytics', auth, async (req, res) => {
                 MAX(created_at)              AS last_active
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
+              AND ${EXCL_TEST}
             GROUP BY domain
             ORDER BY total_generations DESC
             LIMIT 20
@@ -414,6 +441,7 @@ router.get('/analytics', auth, async (req, res) => {
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
               AND created_at >= NOW() - INTERVAL '30 days'
+              AND ${EXCL_TEST}
         `);
 
         // Generation volume by hour of day (reveals peak usage times)
@@ -424,6 +452,7 @@ router.get('/analytics', auth, async (req, res) => {
             FROM usage_logs
             WHERE post_title != 'VALIDATION_CHECK'
               AND created_at >= NOW() - INTERVAL '30 days'
+              AND ${EXCL_TEST}
             GROUP BY EXTRACT(HOUR FROM created_at)
             ORDER BY hour
         `);
@@ -436,6 +465,7 @@ router.get('/analytics', auth, async (req, res) => {
                 COUNT(*) FILTER (WHERE tier != 'free') AS paid_users
             FROM license_keys
             WHERE created_at >= NOW() - INTERVAL '12 weeks'
+              AND NOT is_test
             GROUP BY DATE_TRUNC('week', created_at)
             ORDER BY week
         `);
@@ -450,6 +480,7 @@ router.get('/analytics', auth, async (req, res) => {
             JOIN license_keys lk ON ul.license_key_id = lk.id
             WHERE ul.post_title != 'VALIDATION_CHECK'
               AND ul.created_at >= NOW() - INTERVAL '30 days'
+              AND NOT lk.is_test
             GROUP BY lk.tier, COALESCE(ul.content_type, 'blog_post')
             ORDER BY lk.tier, count DESC
         `);
@@ -938,6 +969,7 @@ router.get('/costs', auth, async (req, res) => {
                 FROM usage_logs
                 WHERE created_at >= NOW() - ($1 || ' days')::interval
                   AND post_title != 'VALIDATION_CHECK'
+                  AND ${EXCL_TEST_COGS}
             `, [days]),
             pool.query(`
                 SELECT cost_event,
@@ -947,6 +979,7 @@ router.get('/costs', auth, async (req, res) => {
                 FROM usage_logs
                 WHERE created_at >= NOW() - ($1 || ' days')::interval
                   AND cost_event IS NOT NULL
+                  AND ${EXCL_TEST_COGS}
                 GROUP BY cost_event
                 ORDER BY cost DESC
             `, [days]),
@@ -960,6 +993,7 @@ router.get('/costs', auth, async (req, res) => {
                 WHERE created_at >= NOW() - ($1 || ' days')::interval
                   AND cost_event = 'generate'
                   AND total_cost_usd IS NOT NULL
+                  AND ${EXCL_TEST_COGS}
                 GROUP BY content_type
                 ORDER BY cost DESC
             `, [days]),
@@ -972,6 +1006,7 @@ router.get('/costs', auth, async (req, res) => {
                 LEFT JOIN license_keys lk ON lk.id = ul.license_key_id
                 WHERE ul.created_at >= NOW() - ($1 || ' days')::interval
                   AND ul.total_cost_usd IS NOT NULL
+                  AND lk.is_test IS NOT TRUE
                 GROUP BY COALESCE(lk.tier, 'unattributed')
                 ORDER BY cost DESC
             `, [days]),
@@ -984,6 +1019,7 @@ router.get('/costs', auth, async (req, res) => {
                 WHERE created_at >= NOW() - ($1 || ' days')::interval
                   AND cost_event = 'generate'
                   AND total_cost_usd IS NOT NULL
+                  AND ${EXCL_TEST_COGS}
             `, [days]),
         ]);
 
