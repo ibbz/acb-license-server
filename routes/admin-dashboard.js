@@ -299,6 +299,7 @@ router.get('/users', auth, async (req, res) => {
                        MAX(created_at) AS last_active
                 FROM usage_logs
                 WHERE post_title != 'VALIDATION_CHECK'
+                  AND domain != 'credit_purchase'   -- bundle-purchase audit rows aren't generations
                 GROUP BY license_key_id
             ) uls ON uls.license_key_id = lk.id
             LEFT JOIN (
@@ -1011,7 +1012,7 @@ router.get('/costs', auth, async (req, res) => {
 // tier is lower()-compared because the DB may hold 'Agency'/'AGENCY' etc.
 router.get('/launch', auth, async (req, res) => {
     try {
-        const [funnel, verif, ttf, cost, wReg, wAct, dBurn, multiDom, ips] = await Promise.all([
+        const [funnel, verif, ttf, cost, wReg, wAct, dBurn, multiDom, ips, bundles] = await Promise.all([
             pool.query(`
                 WITH r AS (SELECT COUNT(*) n FROM free_registrations),
                      a AS (SELECT COUNT(DISTINCT license_key_id) n FROM usage_logs WHERE credits_used > 0),
@@ -1078,6 +1079,25 @@ router.get('/launch', auth, async (req, res) => {
                 GROUP BY registered_ip HAVING COUNT(*) > 2
                 ORDER BY registrations DESC LIMIT 10
             `),
+            // Credit-bundle purchases (one-time revenue, invisible to MRR). Bundle
+            // batches are marked by their notes ('stripe_session:%' / 'bundle:%') and
+            // never expire. Revenue is derived from the fixed price map (credits→$)
+            // in create-checkout-session.js since the amount is only stored as text.
+            // Split by tier bucket: a 'free' buyer is a paying customer the paid-tier
+            // funnel misses entirely.
+            pool.query(`
+                SELECT
+                    CASE WHEN lower(lk.tier) = 'free' THEN 'free' ELSE 'paid' END AS bucket,
+                    COUNT(*)                            AS purchases,
+                    COUNT(DISTINCT lk.id)               AS buyers,
+                    COALESCE(SUM(cb.credits_issued), 0) AS credits_sold,
+                    COALESCE(SUM(CASE cb.credits_issued WHEN 20 THEN 9 WHEN 50 THEN 19 WHEN 120 THEN 39 ELSE 0 END), 0) AS revenue_usd,
+                    COUNT(*) FILTER (WHERE cb.credits_issued NOT IN (20, 50, 120)) AS unknown_priced
+                FROM credit_batches cb
+                JOIN license_keys lk ON lk.id = cb.license_key_id
+                WHERE cb.notes LIKE 'stripe_session:%' OR cb.notes LIKE 'bundle:%'
+                GROUP BY 1
+            `),
         ]);
 
         const f = funnel.rows[0];
@@ -1107,6 +1127,25 @@ router.get('/launch', auth, async (req, res) => {
 
         const costPerSignup = registrations > 0 ? Math.round((freeCostAll / registrations) * 10000) / 10000 : 0;
         const num = (x) => x !== null && x !== undefined ? parseFloat(x) : null;
+
+        // Bundle aggregation (free vs paid buckets → totals).
+        const blank = () => ({ purchases: 0, buyers: 0, credits_sold: 0, revenue_usd: 0, unknown_priced: 0 });
+        const bkt = { free: blank(), paid: blank() };
+        bundles.rows.forEach(r => {
+            const b = bkt[r.bucket] || (bkt[r.bucket] = blank());
+            b.purchases      = parseInt(r.purchases)   || 0;
+            b.buyers         = parseInt(r.buyers)      || 0;
+            b.credits_sold   = parseInt(r.credits_sold) || 0;
+            b.revenue_usd    = parseFloat(r.revenue_usd) || 0;
+            b.unknown_priced = parseInt(r.unknown_priced) || 0;
+        });
+        const bundleTotal = {
+            purchases:      bkt.free.purchases + bkt.paid.purchases,
+            buyers:         bkt.free.buyers + bkt.paid.buyers,
+            credits_sold:   bkt.free.credits_sold + bkt.paid.credits_sold,
+            revenue_usd:    bkt.free.revenue_usd + bkt.paid.revenue_usd,
+            unknown_priced: bkt.free.unknown_priced + bkt.paid.unknown_priced,
+        };
 
         return res.json({
             success: true,
@@ -1144,6 +1183,11 @@ router.get('/launch', auth, async (req, res) => {
                 repeat_ip_registrations: ips.rows.length,
                 top_multi_domain: multiDom.rows,
                 top_ips: ips.rows,
+            },
+            bundles: {
+                total: bundleTotal,
+                free:  bkt.free,
+                paid:  bkt.paid,
             },
         });
     } catch (err) {
