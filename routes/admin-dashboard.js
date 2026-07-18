@@ -256,10 +256,16 @@ router.get('/users', auth, async (req, res) => {
         let pi = 1;
 
         if (tier) { conditions.push(`lk.tier = $${pi++}`); params.push(tier); }
-        if (search) { conditions.push(`(u.email ILIKE $${pi++} OR u.name ILIKE $${pi++} OR fr.registered_domain ILIKE $${pi++})`); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+        if (search) { conditions.push(`(u.email ILIKE $${pi++} OR u.name ILIKE $${pi++} OR lk.registered_domain ILIKE $${pi++})`); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
 
         const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
+        // Each of credit_batches / usage_logs / free_registrations is one-to-many
+        // against a licence. Aggregating more than one of them in a single query
+        // fans out into an m×n Cartesian product — inflating the credit sums by the
+        // generation count and the generation count by the number of credit batches
+        // (AICOBR_USERS_FANOUT_FIX_2026_07_18). Fix: pre-aggregate each relation in
+        // its own subquery, then join the collapsed 1-row-per-licence results.
         const users = await pool.query(`
             SELECT
                 u.id,
@@ -272,24 +278,38 @@ router.get('/users', auth, async (req, res) => {
                 lk.email_verified,
                 lk.registered_domain,
                 lk.created_at              AS license_created,
-                COALESCE(SUM(cb.credits_issued), 0) AS credits_issued,
-                COALESCE(SUM(cb.credits_remaining), 0) AS credits_remaining,
-                COALESCE(SUM(cb.credits_issued - cb.credits_remaining), 0) AS credits_used,
-                COUNT(ul.id)               AS total_generations,
-                MAX(ul.created_at)         AS last_active,
+                COALESCE(cbs.credits_issued, 0)                         AS credits_issued,
+                COALESCE(cbs.credits_remaining, 0)                      AS credits_remaining,
+                COALESCE(cbs.credits_issued - cbs.credits_remaining, 0) AS credits_used,
+                COALESCE(uls.total_generations, 0)                      AS total_generations,
+                uls.last_active,
                 fr.registered_ip
             FROM users u
             JOIN license_keys lk ON lk.user_id = u.id
-            LEFT JOIN credit_batches cb ON cb.license_key_id = lk.id
-            LEFT JOIN usage_logs ul ON ul.license_key_id = lk.id AND ul.post_title != 'VALIDATION_CHECK'
-            LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
+            LEFT JOIN (
+                SELECT license_key_id,
+                       SUM(credits_issued)    AS credits_issued,
+                       SUM(credits_remaining) AS credits_remaining
+                FROM credit_batches
+                GROUP BY license_key_id
+            ) cbs ON cbs.license_key_id = lk.id
+            LEFT JOIN (
+                SELECT license_key_id,
+                       COUNT(*)        AS total_generations,
+                       MAX(created_at) AS last_active
+                FROM usage_logs
+                WHERE post_title != 'VALIDATION_CHECK'
+                GROUP BY license_key_id
+            ) uls ON uls.license_key_id = lk.id
+            LEFT JOIN (
+                SELECT license_key_id, MAX(registered_ip) AS registered_ip
+                FROM free_registrations
+                GROUP BY license_key_id
+            ) fr ON fr.license_key_id = lk.id
             ${where}
-            GROUP BY u.id, u.email, u.name, u.created_at, lk.id, lk.tier,
-                     lk.status, lk.license_key, lk.email_verified,
-                     lk.registered_domain, lk.created_at, fr.registered_ip
             ORDER BY ${safe_sort === 'created_at' ? 'lk.created_at' :
-                       safe_sort === 'last_active' ? 'MAX(ul.created_at)' :
-                       safe_sort === 'credits_used' ? 'credits_used' : 'lk.tier'} ${order}
+                       safe_sort === 'last_active' ? 'last_active' :
+                       safe_sort === 'credits_used' ? 'credits_used' : 'lk.tier'} ${order} NULLS LAST
             LIMIT $${pi++} OFFSET $${pi++}
         `, [...params, limit, offset]);
 
@@ -297,7 +317,6 @@ router.get('/users', auth, async (req, res) => {
             SELECT COUNT(DISTINCT u.id) AS count
             FROM users u
             JOIN license_keys lk ON lk.user_id = u.id
-            LEFT JOIN free_registrations fr ON fr.license_key_id = lk.id
             ${where}
         `, params);
 
