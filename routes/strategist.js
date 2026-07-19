@@ -57,7 +57,9 @@ const pool = new Pool({
 const TIER_RANK = { free: 0, starter: 1, pro: 2, agency: 3 };
 
 // Timespan ceiling per tier, in months (spec §7, real tier names).
-const TIMESPAN_CEILING_MONTHS = { free: 1, starter: 3, pro: 12, agency: 12 };
+// ACB_STRATEGIST_PRO_CEILING_6_2026_07_19: pro dropped 12 → 6 for a clean
+// 1 → 3 → 6 → 12 upgrade ladder (Agency keeps the 12-month exclusive).
+const TIMESPAN_CEILING_MONTHS = { free: 1, starter: 3, pro: 6, agency: 12 };
 
 // The 7 web-facing, keyword-led types a site owner would deliberately calendar.
 // Everything else (About Us, WooCommerce, newsletters, L&D set, etc.) is excluded
@@ -602,11 +604,27 @@ router.post('/plan', async (req, res) => {
     const slots = dates.map((date, i) => ({ i, date }));
     const prompt = buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude });
 
+    // ── ACB_STRATEGIST_TOKENS_SCALE_2026_07_19 ──────────────────────────────
+    // The plan's output size scales with SLOT COUNT, not months: each item is
+    // ~120–200 output tokens of JSON. The old fixed 8,000 cap left zero headroom
+    // for a 40-item (MAX_ITEMS) plan, so dense-cadence runs could truncate,
+    // fail parseJsonLoose, and burn provider spend on every retry. Budget
+    // ~250 tokens/item + 2,000 for the JSON envelope, floored at the old 8,000
+    // so small plans behave exactly as before. max_tokens is a ceiling, not a
+    // spend — unused headroom costs nothing.
+    const planMaxTokens = Math.max(8000, Math.min(2000 + slots.length * 250, 16000));
+
     let parsed;
     try {
-      const claudeRes = await callClaude(prompt);
+      const claudeRes = await callClaude(prompt, planMaxTokens);
       costCtx.usage       = claudeRes.usage;
       costCtx.stop_reason = claudeRes.stop_reason;
+      // Truncated output is amputated JSON — fail BEFORE parsing so it can
+      // never half-parse into a mangled plan. Throwing here lands in the
+      // existing catch: refund, cache invalidation, cost recorded as waste.
+      if (claudeRes.stop_reason === 'max_tokens') {
+        throw new Error(`plan truncated at max_tokens=${planMaxTokens} (${slots.length} slots)`);
+      }
       parsed = parseJsonLoose(claudeRes.text);
     } catch (e) {
       console.warn('[strategist/plan] planning parse failed:', e.message);
