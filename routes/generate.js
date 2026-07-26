@@ -29,6 +29,7 @@ const serp = require('../lib/serp');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
 const costLog = require('../lib/cost-log');
+const { fetchWithRetry } = require('../lib/http-retry');
 
 // The one text model this route uses. The image model/size/quality and the
 // tier-gated policy now live in lib/image-gen.js so /api/generate and
@@ -290,7 +291,17 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
         console.log('[generate] No style profile active — using brand voice only');
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // This call is the one fatal step in the pipeline — image/YouTube/SERP all
+    // fail soft, but a throw here aborts the run after credits are already
+    // deducted. It therefore gets bounded retry on transient network failures
+    // and on 429/5xx/529. See lib/http-retry.js for the billing trade-off.
+    //
+    // Budget: the plugin flags an entry as stuck after 12 minutes, and retries
+    // run while this request holds a ConcurrencyGate permit, so the whole
+    // sequence is capped well inside that window. A fast-failing connection
+    // error (the DNS/egress case) retries freely; a call that hangs for the
+    // full per-attempt timeout is not retried into a second hang.
+    const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -304,6 +315,11 @@ ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every s
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
         }),
+    }, {
+        label:         'generate:anthropic',
+        attempts:      3,
+        timeoutMs:     300000,  // 5 min/attempt — a 16k-token non-streaming reply is well inside this
+        totalBudgetMs: 540000,  // 9 min total, leaving headroom before the plugin's 12-min stuck reset
     });
 
     if (!res.ok) {
