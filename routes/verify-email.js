@@ -20,6 +20,7 @@ const pool = new Pool({
 
 // Customer portal page URL — single source of truth (portal-auth.js).
 const { portalUrl } = require('./portal-auth');
+const conversionTag = require('../lib/conversion-tag');
 
 // HTML-escape any dynamic value before interpolating it into the page.
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
@@ -41,11 +42,11 @@ const keyBox = (licenseKey) => `
 
 // ── Shared HTML page renderer ─────────────────────────────────────────────
 
-const page = ({ success, title, body }) => `
+const page = ({ success, title, body, conversion = '' }) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8">${conversionTag.headTag()}${conversion}
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} — AI Content Bridge</title>
   <style>
@@ -307,6 +308,12 @@ router.get('/', async (req, res) => {
     return res.send(page({
       success: true,
       title:   'Email verified',
+      // Fire the conversion here and ONLY here: this branch runs once, when a
+      // real inbox is verified and the free licence goes active for the first
+      // time. The "already verified" revisit branch above deliberately omits it,
+      // so a refresh or a second click can never re-count. txnId de-dupes at
+      // Google's end as a belt-and-braces second line of defence.
+      conversion: conversionTag.eventTag({ txnId: `lic${row.license_key_id}` }),
       body: `
         <p>Your email <strong>${esc(row.email)}</strong> is verified and your free license is now active.</p>
         ${keyBox(row.license_key)}
