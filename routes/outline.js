@@ -19,6 +19,7 @@ const router  = express.Router();
 const serp    = require('../lib/serp');
 const { Pool } = require('pg');
 const costLog = require('../lib/cost-log');
+const { fetchWithRetry } = require('../lib/http-retry');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -40,7 +41,11 @@ async function callClaude(prompt) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured on server');
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // Bounded retry on transient network faults and 429/5xx/529 — same policy
+    // as /api/generate (see lib/http-retry.js). Tighter budget than generation:
+    // the user is sitting in the outline modal waiting, so fail within ~4 min
+    // rather than stretching towards the diary's stuck threshold.
+    const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -58,6 +63,11 @@ async function callClaude(prompt) {
             temperature: 0.5,
             messages: [{ role: 'user', content: prompt }],
         }),
+    }, {
+        label:         'outline:anthropic',
+        attempts:      3,
+        timeoutMs:     120000,  // 2 min/attempt — an 8k-token outline is well inside this
+        totalBudgetMs: 240000,  // 4 min total; interactive, keep the wait honest
     });
 
     if (!res.ok) {

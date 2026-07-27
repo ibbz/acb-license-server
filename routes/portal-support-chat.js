@@ -80,7 +80,11 @@ router.post('/chat', chatLimiter, requireAuth, async (req, res) => {
   if (!messages.length) return res.status(400).json({ error: 'No message provided.' });
 
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    // Bounded retry on transient faults — but only 2 attempts and a tight
+    // budget: this is a live chat and a person is watching the typing
+    // indicator. One quick replay is worth it; a long retry dance is not.
+    // (See lib/http-retry.js for the shared policy.)
+    const r = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -99,6 +103,11 @@ router.post('/chat', chatLimiter, requireAuth, async (req, res) => {
         ],
         messages,
       }),
+    }, {
+      label:         'support-chat:anthropic',
+      attempts:      2,
+      timeoutMs:     60000,   // 1 min/attempt — 1k-token replies are quick
+      totalBudgetMs: 90000,
     });
 
     if (!r.ok) {

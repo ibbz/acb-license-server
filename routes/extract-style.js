@@ -18,6 +18,7 @@ const pool = new Pool({
 });
 
 const costLog = require('../lib/cost-log');
+const { fetchWithRetry } = require('../lib/http-retry');
 const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
 
 router.post('/', async (req, res) => {
@@ -97,7 +98,10 @@ Return a JSON object with exactly these fields:
 Be specific and actionable. A writer should be able to read this profile and immediately know how to replicate the style.`;
 
     try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        // Bounded retry on transient faults and 429/5xx/529 (lib/http-retry.js).
+        // Interactive and cheap (1k tokens): tight timeout, fail within ~2.5 min
+        // so the user isn't left staring at a spinner in the profile modal.
+        const response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
                 'Content-Type':      'application/json',
@@ -110,6 +114,11 @@ Be specific and actionable. A writer should be able to read this profile and imm
                 system:     systemPrompt,
                 messages:   [{ role: 'user', content: userPrompt }],
             }),
+        }, {
+            label:         'extract-style:anthropic',
+            attempts:      3,
+            timeoutMs:     60000,   // 1 min/attempt
+            totalBudgetMs: 150000,  // 2.5 min total
         });
 
         if (!response.ok) {

@@ -44,6 +44,7 @@ const serp        = require('../lib/serp');
 const serpEvents  = require('../lib/serp-events');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
+const { fetchWithRetry } = require('../lib/http-retry');
 const costLog      = require('../lib/cost-log');
 
 const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
@@ -99,7 +100,12 @@ function parseJsonLoose(text) {
 async function callClaude(prompt, maxTokens = 8000) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured on server');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  // Bounded retry on transient network faults and 429/5xx/529. This is the one
+  // route besides /api/generate that consumes credits, so it gets the same
+  // generous budget as generation: a plan run destroyed by a sub-second DNS
+  // blip loses real money, not just a retry-able page view. Plans can run to
+  // 16k tokens (token-scaling patch), hence the generation-scale timeout.
+  const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -112,6 +118,11 @@ async function callClaude(prompt, maxTokens = 8000) {
       temperature: 0.6,
       messages: [{ role: 'user', content: prompt }],
     }),
+  }, {
+    label:         'strategist:anthropic',
+    attempts:      3,
+    timeoutMs:     300000,  // 5 min/attempt — 16k-token plans are the ceiling
+    totalBudgetMs: 540000,  // 9 min total, mirroring routes/generate.js
   });
   if (!res.ok) {
     const err = await res.text();
