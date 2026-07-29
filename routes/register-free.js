@@ -388,10 +388,11 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
               <p style="margin:10px 0 0;font-size:13px;color:#6b7280;">Keep this safe — you'll need it to activate the plugin in WordPress.</p>
             </div>
 
-            <!-- Fallback link -->
-            <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Button not working? Copy and paste this link into your browser:</p>
-            <p style="margin:0;font-size:12px;word-break:break-all;">
-              <a href="${verifyUrl}" style="color:#1B6EF3;">${verifyUrl}</a>
+            <!-- Fallback link — friendly anchor text; the raw URL lives in the
+                 plaintext part where it belongs. A wall of hex in the visible
+                 body pattern-matches to credential-phishing templates. -->
+            <p style="margin:0;font-size:13px;color:#6b7280;">
+              Button not working? <a href="${verifyUrl}" style="color:#1B6EF3;font-weight:600;">Open the verification page</a> instead.
             </p>
           </div>
 
