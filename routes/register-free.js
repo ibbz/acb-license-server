@@ -367,12 +367,12 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
               <tr>
                 <td align="center">
-                  <table cellpadding="0" cellspacing="0" border="0">
+                  <table cellpadding="0" cellspacing="0" border="0" style="max-width:100%;">
                     <tr>
                       <td align="center" style="background:#1B6EF3;border-radius:10px;">
                         <a href="${verifyUrl}"
-                           style="display:inline-block;padding:15px 36px;background:#1B6EF3;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:700;font-size:16px;font-family:Arial,sans-serif;mso-padding-alt:0;white-space:nowrap;">
-                          Verify Email &amp; Activate License &#8594;
+                           style="display:inline-block;padding:15px 28px;background:#1B6EF3;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:700;font-size:16px;font-family:Arial,Helvetica,sans-serif;mso-padding-alt:0;line-height:1.2;max-width:100%;box-sizing:border-box;">
+                          Verify Email &amp; Activate &#8594;
                         </a>
                       </td>
                     </tr>
