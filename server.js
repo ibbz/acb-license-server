@@ -152,6 +152,17 @@ const freeRegLimiter = rateLimit({
 });
 app.use('/api/register-free', freeRegLimiter);
 
+// Wizard verification polling (AICOBR_WIZARD_POLL_2026_07_29): the onboarding
+// wizard polls every ~4s while the user opens their email, i.e. ~150 requests
+// per 10 minutes from one site's server. 400 leaves headroom for two tabs and
+// retries while still capping key-enumeration attempts to noise.
+const licenseStatusLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 400,
+  message: { success: false, error: 'Too many status checks. Please wait a moment.' }
+});
+app.use('/api/license-status', licenseStatusLimiter);
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
@@ -166,6 +177,8 @@ app.get('/health', (req, res) => {
 app.use('/api/validate',                require('./routes/validate'));
 app.use('/api/verify-license',          require('./routes/verify-license'));
 app.use('/api/register-free',           require('./routes/register-free'));
+app.use('/api/license-status',          require('./routes/license-status'));
+app.use('/api/wizard-event',            require('./routes/wizard-event'));
 app.use('/api/extract-style',           require('./routes/extract-style'));
 app.use('/api/usage',                   require('./routes/usage'));
 app.use('/api/stripe-webhook',          require('./routes/stripe-webhook'));

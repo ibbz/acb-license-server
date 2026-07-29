@@ -71,13 +71,17 @@ router.post('/', async (req, res) => {
       const existing = existingReg.rows[0];
       await client.query('ROLLBACK');
 
-      // If they haven't verified yet, resend the verification email
+      // If they haven't verified yet, resend the verification email.
+      // AICOBR_WIZARD_KEY_RETURN_2026_07_29: also return the key so the wizard
+      // can silently store it and poll /api/license-status — the key is inert
+      // until email_verified flips, so returning it early gates nothing.
       if (!existing.email_verified) {
         await sendVerificationEmail(client, existing.license_key_id, normalizedEmail, existing.license_key);
         return res.json({
           success:         true,
           already_existed: true,
           verified:        false,
+          license_key:     existing.license_key,
           generate_secret: process.env.GENERATE_SECRET || '',
           message:         'You already have a free license. We\'ve resent your verification email — please check your inbox.',
         });
@@ -164,6 +168,11 @@ router.post('/', async (req, res) => {
       success:     true,
       already_existed: false,
       verified:    false,
+      // The key is inert until email verification flips email_verified — the
+      // generation gate in validate.js. Returning it here lets the wizard save
+      // it silently and poll license-status, deleting the manual copy/paste
+      // relay that was losing users between inbox and wp-admin.
+      license_key: licenseKey,
       generate_secret: process.env.GENERATE_SECRET || '',
       message:     'Almost there! Check your email to verify your address and activate your free license.',
     });
