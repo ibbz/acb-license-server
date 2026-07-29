@@ -209,12 +209,33 @@ const activationHelp = (portalHref) => `
 
 router.get('/', async (req, res) => {
   // This route renders HTML, so it overrides the API's global `default-src 'none'`
-  // CSP with one scoped to this page: inline styles + Google Fonts only.
+  // CSP with one scoped to this page.
+  //
+  // AICOBR_CSP_CONV_TAG_2026_07_29 — the conversion tag needs three allowances the
+  // original policy didn't grant, and CSP fails silently in production:
+  //   script-src   → load gtag.js itself from googletagmanager.com
+  //   connect-src  → let gtag POST/beacon the conversion to doubleclick/google
+  //   img-src      → the pixel fallback when sendBeacon/fetch is unavailable
+  // Without all three the inline gtag('event') call queues into dataLayer and is
+  // never drained, so Google receives nothing and the tag stays "unverified".
+  //
+  // Everything stays scoped to Google's conversion endpoints — no wildcards, and
+  // the page still can't load scripts, frames or forms from anywhere else.
+  const GTM   = 'https://www.googletagmanager.com';
+  const ADS   = 'https://googleads.g.doubleclick.net';
+  const TD    = 'https://td.doubleclick.net';
+  const GOOG  = 'https://www.google.com https://www.google.co.uk';
+  const GA    = 'https://www.google-analytics.com https://region1.google-analytics.com https://analytics.google.com';
+
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
-    "script-src 'unsafe-inline'; " +
-    "font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    "default-src 'none'; " +
+    `style-src 'unsafe-inline' https://fonts.googleapis.com; ` +
+    `script-src 'unsafe-inline' ${GTM}; ` +
+    `connect-src ${GTM} ${ADS} ${TD} ${GOOG} ${GA}; ` +
+    `img-src 'self' data: ${GTM} ${ADS} ${GOOG} ${GA}; ` +
+    `frame-src ${TD}; ` +
+    "font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'"
   );
 
   const portalHref = portalUrl();

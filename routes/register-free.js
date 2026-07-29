@@ -207,10 +207,41 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
 
   const verifyUrl = `${process.env.SERVER_URL}/verify-email?token=${token}`;
 
-  await getResend()?.emails.send({
-    from:    process.env.RESEND_FROM_EMAIL,
-    to:      email,
-    subject: 'Verify your email — AI Content Bridge',
+  // AICOBR_MAIL_DELIVERABILITY_2026_07_29
+  // Three deliverability fixes, all of which push a transactional mail towards Junk
+  // when missing:
+  //   1. A plain-text alternative. HTML-only mail scores badly with every major
+  //      filter and renders poorly on iOS Mail, which parses the whole HTML part
+  //      before painting the body.
+  //   2. A Reply-To on a monitored mailbox — a no-reply From with no Reply-To is a
+  //      recognised bulk/phish signature.
+  //   3. A From fallback. Every other route in this codebase has one; this route
+  //      alone passes RESEND_FROM_EMAIL raw, so an unset var makes Resend reject
+  //      the send with a 422 that the old code silently swallowed.
+  const from = process.env.RESEND_FROM_EMAIL
+    || 'AI Content Bridge <noreply@aicontentbridge.com>';
+
+  const textBody = [
+    'Verify your email — AI Content Bridge',
+    '',
+    'Thanks for signing up. Open the link below to verify your email address and',
+    'activate your AI Content Bridge licence and 5 credits.',
+    '',
+    verifyUrl,
+    '',
+    `Your licence key: ${licenseKey}`,
+    "Keep this safe — you'll need it to activate the plugin in WordPress.",
+    '',
+    'This link expires in 24 hours. If you did not request this, ignore this email.',
+    'Questions? support@aicontentbridge.com',
+  ].join('\n');
+
+  const sent = await getResend()?.emails.send({
+    from,
+    to:       email,
+    reply_to: process.env.SUPPORT_EMAIL || 'support@aicontentbridge.com',
+    subject:  'Verify your email — AI Content Bridge',
+    text:     textBody,
     html: `
       <!DOCTYPE html>
       <html lang="en">
@@ -277,7 +308,17 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
     `,
   });
 
-  console.log(`[register-free] Verification email sent to ${email}`);
+  // The Resend SDK resolves with { data, error } rather than throwing on API
+  // errors, so the old unconditional "email sent" log was printed even when the
+  // send had failed — the single worst thing a log line can do during a launch.
+  if (!sent) {
+    console.warn(`[register-free] RESEND_API_KEY unset — no verification email sent to ${email}`);
+  } else if (sent.error) {
+    console.error(`[register-free] Verification email FAILED for ${email}:`,
+      sent.error.message || sent.error);
+  } else {
+    console.log(`[register-free] Verification email sent to ${email} (id: ${sent.data?.id || 'n/a'})`);
+  }
 }
 
 module.exports = router;
