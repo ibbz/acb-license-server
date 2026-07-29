@@ -35,6 +35,7 @@ router.post('/', async (req, res) => {
         lk.id,
         lk.tier,
         lk.status,
+        lk.email_verified,
         lk.monthly_credit_limit,
         u.email AS user_email
       FROM license_keys lk
@@ -51,6 +52,21 @@ router.post('/', async (req, res) => {
     }
 
     const license = result.rows[0];
+
+    // AICOBR_VERIFY_GATE_2026_07_29: free keys are created status='active' with
+    // email_verified=false, and generation (validate.js) is gated on
+    // email_verified. Before this check, an UNVERIFIED free key passed here —
+    // so the plugin marked the site locally verified while every generation
+    // was refused, a licensed-looking dashboard that couldn't work. Mirror the
+    // validate.js gate: free keys must be email-verified to verify. Paid keys
+    // are provisioned by Stripe and never email-verify, so tier-scope this.
+    if (license.tier === 'free' && !license.email_verified) {
+      return res.status(403).json({
+        success: false,
+        code:  'EMAIL_NOT_VERIFIED',
+        error: 'This key isn\'t activated yet — click the verification link in your email first, then try again.'
+      });
+    }
 
     // Get live credit balance from non-expired batches
     const creditsResult = await pool.query(`

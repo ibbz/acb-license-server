@@ -87,14 +87,34 @@ router.post('/', async (req, res) => {
         });
       }
 
-      // Already verified — just return their key
+      // Already verified — AICOBR_KEY_DISCLOSURE_2026_07_29.
+      // Previously the key was returned to WHOEVER typed the email, from any
+      // WordPress install — email enumeration plus key disclosure with no
+      // proof of inbox ownership. Now:
+      //   * requesting domain matches the licence's locked domain → return the
+      //     key (controlling the WP install on that domain IS ownership; this
+      //     keeps reinstalls/re-setups on the same site one-click), or
+      //   * any other domain → email the key to the address on file. Only the
+      //     inbox owner can complete activation.
+      const lockedDomain = (existing.registered_domain || '').toLowerCase();
+      if (lockedDomain && normalizedDomain === lockedDomain) {
+        return res.json({
+          success:         true,
+          already_existed: true,
+          verified:        true,
+          generate_secret: process.env.GENERATE_SECRET || '',
+          license_key:     existing.license_key,
+          message:         'You already have a free license registered to this email.',
+        });
+      }
+
+      await sendExistingKeyEmail(normalizedEmail, existing.license_key, lockedDomain);
       return res.json({
-        success:         true,
-        already_existed: true,
-        verified:        true,
-        generate_secret: process.env.GENERATE_SECRET || '',
-        license_key:     existing.license_key,
-        message:         'You already have a free license registered to this email.',
+        success:           true,
+        already_existed:   true,
+        verified:          true,
+        key_sent_by_email: true,
+        message:           'This email already has a licence. We\'ve emailed the key to it — check the inbox and enter the key here.',
       });
     }
 
@@ -185,6 +205,78 @@ router.post('/', async (req, res) => {
     client.release();
   }
 });
+
+// ── Send existing licence key to the address on file ─────────────────────────
+// AICOBR_KEY_DISCLOSURE_2026_07_29: used when a verified email re-registers
+// from a domain other than the licence's locked one. The key goes to the
+// inbox, not the requester — inbox access is the ownership proof.
+async function sendExistingKeyEmail(email, licenseKey, lockedDomain) {
+  const from = process.env.RESEND_FROM_EMAIL
+    || 'AI Content Bridge <noreply@aicontentbridge.com>';
+
+  const textBody = [
+    'Your AI Content Bridge licence key',
+    '',
+    'Someone (hopefully you) asked for the free licence linked to this email',
+    'while setting up AI Content Bridge on a WordPress site.',
+    '',
+    `Your licence key: ${licenseKey}`,
+    lockedDomain ? `This key is registered to: ${lockedDomain}` : '',
+    '',
+    'Paste it into AI Content Bridge → Setup → "I already have a licence key".',
+    '',
+    'If this wasn\'t you, you can ignore this email — the key only works on its',
+    'registered domain.',
+    'Questions? support@aicontentbridge.com',
+  ].filter(l => l !== null).join('\n');
+
+  const sent = await getResend()?.emails.send({
+    from,
+    to:       email,
+    reply_to: process.env.SUPPORT_EMAIL || 'support@aicontentbridge.com',
+    subject:  'Your AI Content Bridge licence key',
+    text:     textBody,
+    html: `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+      <body style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;margin:0;padding:40px 20px;">
+        <div style="max-width:520px;margin:0 auto;">
+          <div style="background:#06101E;border-radius:14px 14px 0 0;padding:28px 32px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#5CA5FF;">AI Content Bridge</p>
+            <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;line-height:1.2;">Your licence key</h1>
+          </div>
+          <div style="background:#ffffff;padding:32px;">
+            <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.65;">
+              Someone (hopefully you) asked for the free licence linked to this email while setting up AI Content Bridge on a WordPress site.
+            </p>
+            <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:20px;margin:0 0 20px;text-align:center;">
+              <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#1B6EF3;">Your Licence Key</p>
+              <p style="margin:0;font-family:'Courier New',monospace;font-size:17px;font-weight:700;color:#1e3a5f;letter-spacing:0.06em;">${licenseKey}</p>
+              ${lockedDomain ? `<p style="margin:10px 0 0;font-size:13px;color:#6b7280;">Registered to: <strong>${lockedDomain}</strong></p>` : ''}
+            </div>
+            <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+              Paste it into <strong>AI Content Bridge &rarr; Setup &rarr; "I already have a licence key"</strong>.
+            </p>
+          </div>
+          <div style="background:#f8fafc;border-radius:0 0 14px 14px;border-top:1px solid #e2e8f0;padding:20px 32px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">If this wasn't you, ignore this email — the key only works on its registered domain.</p>
+            <p style="margin:0;font-size:12px;color:#9ca3af;">
+              Questions? <a href="mailto:support@aicontentbridge.com" style="color:#1B6EF3;text-decoration:none;">support@aicontentbridge.com</a>
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  });
+
+  if (sent?.error) {
+    console.error(`[register-free] Existing-key email FAILED for ${email}:`, sent.error.message || sent.error);
+  } else if (sent) {
+    console.log(`[register-free] Existing-key email sent to ${email} (id: ${sent.data?.id || 'n/a'})`);
+  }
+}
 
 // ── Send verification email (shared by register + resend paths) ─────────────
 
