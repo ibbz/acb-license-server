@@ -14,6 +14,7 @@ const router   = express.Router();
 const { Pool } = require('pg');
 const crypto   = require('crypto');
 const { Resend } = require('resend');
+const { canonicalEmail, isTestEmail } = require('../lib/email-canonical');
 
 const pool   = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -59,13 +60,32 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
 
     // ── Check: has this email already registered a free license? ───────────
-    const existingReg = await client.query(
-      `SELECT fr.*, lk.license_key, lk.status, lk.email_verified
-       FROM free_registrations fr
-       JOIN license_keys lk ON fr.license_key_id = lk.id
-       WHERE fr.email = $1`,
-      [normalizedEmail]
-    );
+    // AICOBR_CANONICAL_EMAIL_2026_07_29: match on the CANONICAL address, not the
+    // raw string, so +tags and Gmail dots can't mint unlimited 5-credit
+    // licences. Legacy rows written before this migration may have a NULL
+    // canonical_email, so the query also falls back to an exact match on the
+    // raw address — no historical registration can slip through.
+    //
+    // isTestEmail() exempts addresses in ACB_TEST_EMAILS (unset in production),
+    // so pre-launch testing never requires hand-editing live rows.
+    const canonical = canonicalEmail(normalizedEmail);
+    const skipDuplicateCheck = isTestEmail(normalizedEmail);
+
+    const existingReg = skipDuplicateCheck
+      ? { rows: [] }
+      : await client.query(
+          `SELECT fr.*, lk.license_key, lk.status, lk.email_verified
+           FROM free_registrations fr
+           JOIN license_keys lk ON fr.license_key_id = lk.id
+           WHERE fr.canonical_email = $1 OR fr.email = $2
+           ORDER BY fr.created_at
+           LIMIT 1`,
+          [canonical, normalizedEmail]
+        );
+
+    if (skipDuplicateCheck) {
+      console.log(`[register-free] TEST EMAIL ${normalizedEmail} — duplicate check skipped`);
+    }
 
     if (existingReg.rows.length > 0) {
       const existing = existingReg.rows[0];
@@ -174,9 +194,9 @@ router.post('/', async (req, res) => {
     // ── Record free registration for abuse tracking ─────────────────────────
     await client.query(
       `INSERT INTO free_registrations
-         (email, license_key_id, registered_domain, registered_ip, created_at)
-       VALUES ($1, $2, $3, $4, NOW())`,
-      [normalizedEmail, licenseKeyId, normalizedDomain, ip]
+         (email, canonical_email, license_key_id, registered_domain, registered_ip, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [normalizedEmail, canonical, licenseKeyId, normalizedDomain, ip]
     );
 
     // ── Send verification email ─────────────────────────────────────────────
