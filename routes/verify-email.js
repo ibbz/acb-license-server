@@ -223,17 +223,30 @@ router.get('/', async (req, res) => {
   // the page still can't load scripts, frames or forms from anywhere else.
   const GTM   = 'https://www.googletagmanager.com';
   const ADS   = 'https://googleads.g.doubleclick.net';
+  const ADC   = 'https://ad.doubleclick.net';
   const TD    = 'https://td.doubleclick.net';
   const GOOG  = 'https://www.google.com https://www.google.co.uk';
   const GA    = 'https://www.google-analytics.com https://region1.google-analytics.com https://analytics.google.com';
 
+  // AICOBR_CSP_CONV_TAG_FIX_2026_07_30 — the 2026-07-29 policy allowed the gtag.js
+  // loader but still blocked the conversion itself, observed live in the console:
+  //   1. gtag loads the conversion pixel from googleads.g.doubleclick.net as a
+  //      SCRIPT (…/pagead/viewthroughconversion/…). That host was in connect-src
+  //      but NOT script-src, so the pixel — i.e. the conversion firing — was
+  //      refused. ADS must therefore appear in script-src too.
+  //   2. gtag fetches https://ad.doubleclick.net/ccm/s/collect (the ccm/collect
+  //      measurement beacon). ad.doubleclick.net is a DIFFERENT host from the
+  //      googleads./td. subdomains already listed, so it was refused. Added to
+  //      connect-src (the fetch) and img-src (its pixel fallback).
+  // Net effect: the loader loading was necessary but not sufficient — the tag
+  // stayed "Inactive" because every downstream doubleclick call was blocked.
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'none'; " +
     `style-src 'unsafe-inline' https://fonts.googleapis.com; ` +
-    `script-src 'unsafe-inline' ${GTM}; ` +
-    `connect-src ${GTM} ${ADS} ${TD} ${GOOG} ${GA}; ` +
-    `img-src 'self' data: ${GTM} ${ADS} ${GOOG} ${GA}; ` +
+    `script-src 'unsafe-inline' ${GTM} ${ADS}; ` +
+    `connect-src ${GTM} ${ADS} ${ADC} ${TD} ${GOOG} ${GA}; ` +
+    `img-src 'self' data: ${GTM} ${ADS} ${ADC} ${GOOG} ${GA}; ` +
     `frame-src ${TD}; ` +
     "font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'"
   );
