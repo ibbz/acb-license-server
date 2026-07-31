@@ -88,6 +88,8 @@ const page = ({ success, title, body, conversion = '' }) => `
     .path-tag{ display:flex; align-items:center; gap:9px; font-family:var(--sans); font-weight:600; font-size:14.5px; color:#fff; margin-bottom:5px; }
     .path-tag svg{ flex-shrink:0; color:var(--blue3); }
     .path-sub{ font-size:12.5px; color:var(--dim); line-height:1.5; margin:0 0 13px; }
+    .portal-note{ margin:18px 0 0; font-size:12.5px; color:var(--dim); text-align:center; }
+    .portal-note a{ color:var(--blue3); }
     .path .step{ font-size:13.5px; margin-bottom:11px; }
     .path-btn{ display:inline-flex; align-items:center; gap:6px; margin-top:13px; padding:9px 16px; border-radius:9px; background:linear-gradient(135deg,var(--blue),var(--blue2)); color:#fff; font-family:var(--sans); font-weight:600; font-size:13px; text-decoration:none; box-shadow:0 6px 18px rgba(27,110,243,0.32); }
     .path-btn:hover{ filter:brightness(1.07); }
@@ -173,36 +175,37 @@ const page = ({ success, title, body, conversion = '' }) => `
 </html>
 `;
 
-// ── Activation guidance — covers BOTH onboarding journeys ───────────────────
-// A user may arrive here having already installed the plugin (registered via the
-// in-plugin setup wizard), OR straight from the website (plugin not yet installed
-// — they must sign in to the portal and download it first). We show both paths.
+// ── Activation guidance — single path (matches the 2.8.8 funnel) ────────────
+// Per product spec v1.7: WordPress.org is the SOLE entry point for the free
+// tier and registration happens INSIDE the plugin's setup wizard. Anyone who
+// reaches this page has therefore already installed the plugin and is sitting
+// in the wizard — so there is exactly one activation path: paste the key.
+//
+// The previous version of this page showed a second "register on the website →
+// sign into the portal → download the plugin → upload it" path. That is the
+// deprecated ten-step flow the funnel rebuild explicitly removed (spec: the
+// competing on-site signup "had been sending visitors to look for a portal
+// download the product no longer uses"). It contradicted the wizard flow and
+// re-introduced the friction 2.8.8 was built to delete, so it's gone.
+//
+// The portal still exists — but for account & billing (portal-auth.js: login /
+// account data / billing rows), NOT as a plugin source. It's now a small
+// footnote, not an activation step.
 const activationHelp = (portalHref) => `
-  <div class="activate-head">Two ways to activate — pick the one that's you</div>
+  <div class="activate-head">One more step — activate your license</div>
 
   <div class="path">
     <div class="path-tag">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      Already installed the plugin from WordPress?
+      Finish setup in WordPress
     </div>
-    <p class="path-sub">You registered through the plugin's setup wizard — you're almost done.</p>
+    <p class="path-sub">You registered through the plugin's setup wizard — you're almost done. If the wizard is still open, it will activate on its own within a few seconds. To finish manually:</p>
     <div class="step"><div class="step-num">1</div><div>Go back to the <strong>AI Content Bridge</strong> screen in your WordPress admin</div></div>
     <div class="step"><div class="step-num">2</div><div>Paste the license key above into the setup wizard or <strong>Settings</strong></div></div>
     <div class="step"><div class="step-num">3</div><div>Click <strong>Save / Verify License</strong> — you're ready to generate</div></div>
   </div>
 
-  <div class="path">
-    <div class="path-tag">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-      Registered here on the website?
-    </div>
-    <p class="path-sub">Grab the plugin from your account portal first, then activate it with this key.</p>
-    <div class="step"><div class="step-num">1</div><div>Open your <strong>account portal</strong> and sign in with your email <span class="muted">— we'll email you a magic link</span></div></div>
-    <div class="step"><div class="step-num">2</div><div><strong>Download</strong> the AI Content Bridge plugin from the portal</div></div>
-    <div class="step"><div class="step-num">3</div><div>In WordPress, go to <strong>Plugins &rarr; Add New &rarr; Upload Plugin</strong> and activate it</div></div>
-    <div class="step"><div class="step-num">4</div><div>Open <strong>AI Content Bridge &rarr; Settings</strong>, paste your license key and save</div></div>
-    <a class="path-btn" href="${portalHref}">Go to your portal &rarr;</a>
-  </div>
+  <p class="portal-note">Need to manage your account or billing? <a href="${portalHref}">Open your account portal &rarr;</a></p>
 `;
 
 // ── Route ─────────────────────────────────────────────────────────────────
