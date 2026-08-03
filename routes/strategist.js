@@ -496,8 +496,18 @@ router.post('/preview', async (req, res) => {
     // Resolve tier from the DB (don't trust a client-sent tier).
     let tier = 'free';
     if (license_key) {
-      const r = await pool.query(`SELECT tier FROM license_keys WHERE license_key = $1 AND status = 'active' LIMIT 1`, [license_key]);
-      if (r.rows.length) tier = normaliseTier(r.rows[0].tier);
+      // AICOBR_AGENCY_TRIAL_2026_08: while the free trial batch has balance the
+      // palette is the Agency palette; afterwards the real tier's palette.
+      const r = await pool.query(
+        `SELECT lk.tier,
+                COALESCE((SELECT SUM(credits_remaining) FROM credit_batches
+                          WHERE license_key_id = lk.id AND notes = 'free_tier_initial'
+                            AND expiry_date > CURRENT_DATE), 0) AS trial_remaining
+         FROM license_keys lk WHERE lk.license_key = $1 AND lk.status = 'active' LIMIT 1`, [license_key]);
+      if (r.rows.length) {
+        tier = normaliseTier(r.rows[0].tier);
+        if (tier === 'free' && parseInt(r.rows[0].trial_remaining) > 0) tier = 'agency';
+      }
     }
 
     const timespan = clampTimespan(params.timespan_months, tier);
@@ -563,19 +573,28 @@ router.post('/plan', async (req, res) => {
 
   try {
     // Resolve tier + compute the slot dates + cost up front (all pure / cheap).
-    const lkRow = await client.query(`SELECT tier FROM license_keys WHERE license_key = $1 AND status = 'active' LIMIT 1`, [license_key]);
+    const lkRow = await client.query(
+      `SELECT lk.tier,
+              COALESCE((SELECT SUM(credits_remaining) FROM credit_batches
+                        WHERE license_key_id = lk.id AND notes = 'free_tier_initial'
+                          AND expiry_date > CURRENT_DATE), 0) AS trial_remaining
+       FROM license_keys lk WHERE lk.license_key = $1 AND lk.status = 'active' LIMIT 1`, [license_key]);
     if (lkRow.rows.length === 0) {
       client.release();
       return res.status(403).json({ success: false, error: 'License not active' });
     }
     const tier = normaliseTier(lkRow.rows[0].tier);
+    // AICOBR_AGENCY_TRIAL_2026_08: trial opens the TYPE palette (Agency), but
+    // plan LENGTH stays on the real tier — the trial is type-scoped by design.
+    const trialActive = tier === 'free' && parseInt(lkRow.rows[0].trial_remaining) > 0;
+    const paletteTier = trialActive ? 'agency' : tier;
     const timespan = clampTimespan(params.timespan_months, tier);
     const dates = expandCadence(params.cadence, timespan, params.start_date);
     if (dates.length === 0) {
       client.release();
       return res.status(400).json({ success: false, error: 'That cadence produced no dates — check the cadence and timespan.' });
     }
-    const palette = resolvePalette(tier, params.content_types);
+    const palette = resolvePalette(paletteTier, params.content_types);
     if (palette.length === 0) {
       client.release();
       return res.status(400).json({ success: false, error: 'No content types are available on this plan.' });

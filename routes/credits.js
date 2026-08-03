@@ -53,6 +53,7 @@ router.get('/', async (req, res) => {
     const creditsResult = await pool.query(`
       SELECT 
         COALESCE(SUM(credits_remaining), 0) as credits_remaining,
+        COALESCE(SUM(credits_remaining) FILTER (WHERE notes = 'free_tier_initial'), 0) as trial_remaining,
         MIN(expiry_date) FILTER (WHERE credits_remaining > 0) as next_expiry_date,
         COUNT(*) as active_batches
       FROM credit_batches
@@ -82,21 +83,27 @@ router.get('/', async (req, res) => {
     // monthly_credit_limit column is NOT NULL DEFAULT 5 and isn't updated on
     // upgrade, so honour it ONLY when deliberately raised above the tier default
     // (i.e. a custom plan) — otherwise paid licences would report the free/5 value.
-    const TIER_LIMITS = { free: 5, starter: 30, pro: 100, agency: 300 };
+    const TIER_LIMITS = { free: 10, starter: 45, pro: 130, agency: 420 }; // AICOBR_MODEL_A_LADDER_2026_08 + 10-credit trial
     const tierDefault = TIER_LIMITS[tier] || 5;
     const effectiveLimit = (monthly_credit_limit != null && monthly_credit_limit > tierDefault)
       ? monthly_credit_limit
       : tierDefault;
 
-    const { credits_remaining, next_expiry_date, active_batches } = creditsResult.rows[0];
+    const { credits_remaining, trial_remaining, next_expiry_date, active_batches } = creditsResult.rows[0];
 
     const finalCredits = parseInt(credits_remaining) || 0;
+    // AICOBR_AGENCY_TRIAL_2026_08: while the free_tier_initial batch has
+    // balance a free licence has the Agency type palette; the plugin renders
+    // type locks from this flag.
+    const trialCredits = parseInt(trial_remaining) || 0;
 
     const response = {
       success: true,
       tier: tier,
       monthly_credit_limit: effectiveLimit,
       credits_remaining: finalCredits,
+      trial_active: tier === 'free' && trialCredits > 0,
+      trial_credits_remaining: tier === 'free' ? trialCredits : 0,
       next_expiry_date: next_expiry_date || null,
       active_batches: parseInt(active_batches) || 0
     };

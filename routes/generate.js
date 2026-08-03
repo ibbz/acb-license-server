@@ -477,7 +477,8 @@ router.post('/', async (req, res) => {
     try {
         const licResult = await pool.query(`
             SELECT lk.id, lk.tier, lk.status, lk.registered_domain,
-                   COALESCE(SUM(cb.credits_remaining), 0) AS credits_remaining
+                   COALESCE(SUM(cb.credits_remaining), 0) AS credits_remaining,
+                   COALESCE(SUM(cb.credits_remaining) FILTER (WHERE cb.notes = 'free_tier_initial'), 0) AS trial_remaining
             FROM license_keys lk
             LEFT JOIN credit_batches cb
                 ON cb.license_key_id = lk.id AND cb.expiry_date > CURRENT_DATE
@@ -540,11 +541,22 @@ router.post('/', async (req, res) => {
             return res.status(402).json({ success: false, error: 'Insufficient credits', credits_remaining: parseInt(lic.credits_remaining) });
         }
 
-        // Check content type is accessible on this tier
-        if (!canAccessContentType(activeContentType, lic.tier)) {
+        // ── Content-type access (AICOBR_AGENCY_TRIAL_2026_08) ─────────────
+        // Free licences start with 10 "Agency credits" (the free_tier_initial
+        // batch): while that batch has balance, every content type is open.
+        // The ledger spends soonest-expiry-first, so the 1-year trial batch is
+        // always consumed before never-expiring bundle credits — the trial
+        // therefore ends exactly when its own 10 credits are spent. Once
+        // spent, the real tier gates return (free = Blog Post only; bundle
+        // credits on free remain blog-only by design). ACF stays gated on the
+        // ACTUAL tier above — the trial opens types, not Pro features.
+        const trialActive = lic.tier === 'free' && parseInt(lic.trial_remaining) > 0;
+        const typeTier    = trialActive ? 'agency' : lic.tier;
+        if (!canAccessContentType(activeContentType, typeTier)) {
+            const freeMsg = `Your 10 trial credits included every content type — on the free plan, "${activeContentType}" needs an upgrade. Blog Post is still available, and any bundle credits you buy generate Blog Posts.`;
             return res.status(403).json({
                 success: false,
-                error: `The "${activeContentType}" content type is not available on your current plan. Please upgrade to access it.`,
+                error: lic.tier === 'free' ? freeMsg : `The "${activeContentType}" content type is not available on your current plan. Please upgrade to access it.`,
                 code: 'content_type_locked',
             });
         }
