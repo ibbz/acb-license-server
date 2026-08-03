@@ -83,7 +83,7 @@ router.get('/', async (req, res) => {
     // monthly_credit_limit column is NOT NULL DEFAULT 5 and isn't updated on
     // upgrade, so honour it ONLY when deliberately raised above the tier default
     // (i.e. a custom plan) — otherwise paid licences would report the free/5 value.
-    const TIER_LIMITS = { free: 10, starter: 45, pro: 130, agency: 420 }; // AICOBR_MODEL_A_LADDER_2026_08 + 10-credit trial
+    const TIER_LIMITS = { free: 10, starter: 30, pro: 100, agency: 300 }; // free = 10-credit trial; paid = original allowances (AICOBR_TRIAL_REVERT_2026_08)
     const tierDefault = TIER_LIMITS[tier] || 5;
     const effectiveLimit = (monthly_credit_limit != null && monthly_credit_limit > tierDefault)
       ? monthly_credit_limit

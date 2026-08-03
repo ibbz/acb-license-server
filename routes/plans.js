@@ -27,10 +27,13 @@ const PLAN_PRICE_IDS = {
 
 // Monthly credit allowance per paid tier (identical for monthly and annual —
 // annual is a billing-frequency discount, not a credit difference).
-// AICOBR_MODEL_A_LADDER_2026_08: allowances raised so every subscription
-// beats every one-time bundle per credit (commitment < convenience), and each
-// higher tier beats the one below. Prices unchanged — Stripe untouched.
-const CREDIT_ALLOWANCE = { starter: 45, pro: 130, agency: 420 };
+// AICOBR_TRIAL_REVERT_2026_08: allowances returned to original values. The
+// Model A raise (45/130/420) existed to stop one-time bundles dominating
+// subscriptions on per-credit price; the Agency-trial system now solves that
+// structurally (post-trial free = Blog Post only, so bundles can't substitute
+// for a subscription's type access). Bundle prices stay at their raised
+// levels ($9/$22/$52) as the never-expire premium.
+const CREDIT_ALLOWANCE = { starter: 30, pro: 100, agency: 300 };
 
 const TIER_RANK = { free: 0, starter: 1, pro: 2, agency: 3 };
 
