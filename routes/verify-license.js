@@ -37,6 +37,7 @@ router.post('/', async (req, res) => {
         lk.status,
         lk.email_verified,
         lk.monthly_credit_limit,
+        lk.registered_domain,
         u.email AS user_email
       FROM license_keys lk
       JOIN users u ON lk.user_id = u.id
@@ -66,6 +67,29 @@ router.post('/', async (req, res) => {
         code:  'EMAIL_NOT_VERIFIED',
         error: 'This key isn\'t activated yet — click the verification link in your email first, then try again.'
       });
+    }
+
+    // AICOBR_VERIFY_DOMAIN_LOCK_2026_08: mirror the free-tier domain lock that
+    // generate.js already enforces (ACB_FREE_DOMAIN_LOCK_GENERATE_2026_07_18).
+    // Without this, a key locked to site A "activated" fine on site B and only
+    // failed at first generation — the same licensed-looking-but-unusable
+    // dashboard this route was previously patched for with unverified keys.
+    // Reject at activation, with the same message and code the user would have
+    // hit later, so the transfer path (support) is offered at the right moment.
+    // Free tier only; paid keys are not domain-locked. Same kill-switch as
+    // generate.js so one env var disables the lock everywhere at once.
+    if (license.tier === 'free' && process.env.ACB_FREE_DOMAIN_LOCK !== 'off') {
+      const incomingDomain = (domain || '').trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const lockedDomain = (license.registered_domain || '').toLowerCase();
+      if (lockedDomain && incomingDomain && lockedDomain !== incomingDomain) {
+        console.warn(`[verify-license] DOMAIN_MISMATCH: key ...${license_key.slice(-6)} locked to ${lockedDomain}, activation attempt from ${incomingDomain}`);
+        return res.status(403).json({
+          success: false,
+          code:  'DOMAIN_MISMATCH',
+          error: `This free licence is registered to ${license.registered_domain}. To move it to a new domain please contact support@aicontentbridge.com.`,
+        });
+      }
     }
 
     // Get live credit balance from non-expired batches
