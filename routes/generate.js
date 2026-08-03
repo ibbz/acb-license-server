@@ -561,13 +561,13 @@ router.post('/', async (req, res) => {
                 code: 'acf_locked',
             });
         }
-        if (include_youtube && lic.tier === 'free') {
-            return res.status(403).json({
-                success: false,
-                error: 'YouTube video embedding is available on the Starter plan and above. Untick "Include YouTube Video" or upgrade your plan.',
-                code: 'youtube_locked',
-            });
-        }
+        // AICOBR_YOUTUBE_FREE_2026_08: the free-tier YouTube gate that used to
+        // sit here is removed — video embeds are available on all tiers. It was
+        // also a UX trap: the plugin can't pre-filter by plan (WP.org Guideline
+        // 5), and /outline runs before /generate, so free users only saw the
+        // rejection AFTER investing in the outline step. YouTube search is
+        // near-zero marginal cost (Data API quota, no AI spend), so credits
+        // remain the only constraint.
 
         licenseId = lic.id;
     } catch (err) {

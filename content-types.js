@@ -350,6 +350,17 @@ const CONTENT_TYPES = {
 function canAccessContentType(contentTypeId, userTier) {
     const ct = CONTENT_TYPES[contentTypeId];
     if (!ct) return false;
+    // ── AICOBR_ALL_TYPES_OPEN_2026_08 ────────────────────────────────────────
+    // Experiment: every content type is available on every tier. Credits are
+    // the sole usage constraint (they already meter provider cost), and paid
+    // tiers differentiate on credit volume + features (ACF targeting stays
+    // Pro/Agency — gated separately in routes/generate.js). Rationale: a free
+    // user hitting "locked" on the type they came for churns before tasting
+    // the product; letting them generate it and hit the credit wall instead
+    // converts better. Per-type usage is recorded in ai_usage, so a month of
+    // data can confirm or kill this.
+    // To REVERT: delete the next line — tier ranking below is untouched.
+    return true;
     return TIER_RANK[userTier] >= TIER_RANK[ct.tier];
 }
 

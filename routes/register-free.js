@@ -183,11 +183,14 @@ router.post('/', async (req, res) => {
     );
     const licenseKeyId = licenseResult.rows[0].id;
 
-    // ── Grant initial 5 free credits (expire in 1 year) ────────────────────
+    // ── Grant initial 10 free credits (expire in 1 year) ───────────────────
+    // AICOBR_FREE_10_CREDITS_2026_08: raised from 5 so the free trial covers a
+    // complete first experience — 1 credit Content Strategist plan + three
+    // 3-credit posts with featured images (1 + 3×3 = 10 exactly).
     await client.query(
       `INSERT INTO credit_batches
          (license_key_id, credits_issued, credits_remaining, issued_date, expiry_date, notes)
-       VALUES ($1, 5, 5, NOW(), NOW() + INTERVAL '1 year', 'free_tier_initial')`,
+       VALUES ($1, 10, 10, NOW(), NOW() + INTERVAL '1 year', 'free_tier_initial')`,
       [licenseKeyId]
     );
 
@@ -346,7 +349,7 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
     'Verify your email — AI Content Bridge',
     '',
     'Thanks for signing up. Open the link below to verify your email address and',
-    'activate your AI Content Bridge licence and 5 credits.',
+    'activate your AI Content Bridge licence and 10 credits.',
     '',
     verifyUrl,
     '',
@@ -374,7 +377,7 @@ async function sendVerificationEmail(client, licenseKeyId, email, licenseKey) {
           <div style="background:#06101E;border-radius:14px 14px 0 0;padding:32px;text-align:center;">
             <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#5CA5FF;">AI Content Bridge</p>
             <h1 style="margin:0;font-size:24px;font-weight:700;color:#ffffff;line-height:1.2;">Verify your email</h1>
-            <p style="margin:10px 0 0;font-size:14px;color:#94a3b8;line-height:1.5;">One click to activate your free license and 5 credits</p>
+            <p style="margin:10px 0 0;font-size:14px;color:#94a3b8;line-height:1.5;">One click to activate your free license and 10 credits</p>
           </div>
 
           <!-- Body -->
