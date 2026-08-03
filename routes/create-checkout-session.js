@@ -28,13 +28,13 @@ const BUNDLES = {
     popular: {
         name:        'Popular Pack',
         credits:     50,
-        price_cents: 1900,  // $19.00
+        price_cents: 2200,  // $22.00 (AICOBR_MODEL_A_LADDER_2026_08)
         description: '50 credits — never expire',
     },
     power: {
         name:        'Power Pack',
         credits:     120,
-        price_cents: 3900,  // $39.00
+        price_cents: 5200,  // $52.00 (AICOBR_MODEL_A_LADDER_2026_08)
         description: '120 credits — never expire',
     },
 };

@@ -27,7 +27,10 @@ const PLAN_PRICE_IDS = {
 
 // Monthly credit allowance per paid tier (identical for monthly and annual —
 // annual is a billing-frequency discount, not a credit difference).
-const CREDIT_ALLOWANCE = { starter: 30, pro: 100, agency: 300 };
+// AICOBR_MODEL_A_LADDER_2026_08: allowances raised so every subscription
+// beats every one-time bundle per credit (commitment < convenience), and each
+// higher tier beats the one below. Prices unchanged — Stripe untouched.
+const CREDIT_ALLOWANCE = { starter: 45, pro: 130, agency: 420 };
 
 const TIER_RANK = { free: 0, starter: 1, pro: 2, agency: 3 };
 
