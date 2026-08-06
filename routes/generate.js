@@ -222,6 +222,7 @@ async function generateContent(payload, costCtx) {
         special_instructions, brand_voice, tone, style_profile,
         content_type, content_type_meta,
         approved_outline, serp_gl, serp_hl,
+        cluster_pillar,
     } = payload;
 
     // Build the user prompt using the content type template
@@ -270,6 +271,55 @@ NEVER DO: ${style_profile.profile.forbidden || ''}
 </writing_style_profile>
 ` : '';
 
+    // ── Internal linking (topic clusters) ───────────────────────────────────
+    // AICOBR_CLUSTER_PILLAR_2026_08
+    //
+    // This article was planned by the Content Strategist as a SPOKE supporting an
+    // existing page on the user's site (the "pillar"). That page already exists and
+    // already has a URL, so the link can be written into the prose AS THE ARTICLE IS
+    // WRITTEN — no post-processing, no second API call, no credit cost, and the anchor
+    // text lands in a real sentence instead of a bolted-on "read more" list.
+    //
+    // The constraints below are load-bearing, not politeness:
+    //   - "exactly once" — without it the model sprays the link through every section
+    //   - "no list/related block" — without it it appends a link farm at the end,
+    //     which is precisely the generic output this feature exists to beat
+    //   - "no other internal links" — the model will otherwise invent plausible-looking
+    //     internal URLs for pages that do not exist, producing 404s
+    //   - "mid-article" — a link in the intro reads as an ad; buried in the body it
+    //     reads as a reference, which is also where it carries more SEO weight
+    const pillarUrl   = String(cluster_pillar?.url   || '').trim();
+    const pillarTitle = String(cluster_pillar?.title || '').trim();
+    const hasPillar   = /^https?:\/\//i.test(pillarUrl) && pillarTitle.length > 0;
+
+    const internalLinkBlock = hasPillar ? `
+<internal_link>
+This article supports an existing page on the same website:
+  Page title: ${pillarTitle}
+  Page URL:   ${pillarUrl}
+
+Link to that page EXACTLY ONCE, somewhere in the middle of the article, using
+MARKDOWN link syntax: [natural anchor text](${pillarUrl})
+
+Rules:
+- Use markdown link syntax, NOT an HTML <a> tag. Raw HTML anchors are escaped by
+  the publishing pipeline and will render as visible broken markup.
+- The anchor text must be descriptive words that fit the sentence naturally.
+  Never "click here", "this page", "read more", or the bare URL.
+- The link must sit inside a normal body paragraph, at the point where a reader
+  would genuinely want it. Do not put it in the introduction or the conclusion.
+- Do NOT add a "related articles", "read next", "further reading" or similar
+  list or section anywhere in the article.
+- Do NOT link to any other internal page. You do not know what other pages exist
+  on this site, and inventing internal URLs creates broken links.
+- Do not mention that you were instructed to add a link.
+</internal_link>
+` : '';
+
+    if (hasPillar) {
+        console.log(`[generate] Cluster spoke — linking up to pillar: ${pillarTitle} (${pillarUrl})`);
+    }
+
     const systemPrompt = `You are an expert content writer and brand voice specialist.
 
 <brand_voice>
@@ -280,8 +330,10 @@ ${brand_voice || '{"voice": "Professional yet approachable"}'}
 ${tone || 'professional'}
 </tone>
 ${styleProfileBlock}
-${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}
-${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}`;
+${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}${internalLinkBlock}
+${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}${hasPillar ? `
+
+The <internal_link> instruction is MANDATORY and must be followed exactly once. It does not override the brand voice — the link must read as a natural part of the writing.` : ''}`;
 
     // Debug — log whether style profile is being applied
     if (style_profile?.profile) {
@@ -442,6 +494,10 @@ router.post('/', async (req, res) => {
         style_profile,
         content_type,
         content_type_meta,
+        // AICOBR_CLUSTER_PILLAR_2026_08 — resolved plugin-side from the diary
+        // entry (never sent by the browser) and used to write a contextual
+        // internal link up to the pillar page as the article is generated.
+        cluster_pillar,
         // LMS integration
         lms_type,
         lms_course_id,
@@ -656,6 +712,7 @@ router.post('/', async (req, res) => {
             special_instructions, brand_voice, tone, style_profile,
             content_type, content_type_meta,
             approved_outline, serp_gl, serp_hl,
+            cluster_pillar,
         }, costCtx);
         // Attach a handler immediately. generateContent can reject *before* its first
         // await (a missing config value, a synchronous throw). Because we await the

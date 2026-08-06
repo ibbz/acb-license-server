@@ -263,7 +263,7 @@ async function runResearch(seeds, gl, industry, location, windowStart, windowEnd
 }
 
 // ─── planning prompt ──────────────────────────────────────────────────────────
-function buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude }) {
+function buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude, pillar }) {
   const paletteLines = palette
     .map(p => `  - ${p.type} (${p.intent}, ${p.credits} credits): ${p.label}`)
     .join('\n');
@@ -292,13 +292,39 @@ function buildPlanningPrompt({ business, palette, seeds, grounded, events, slots
 
   const infoPct = Math.round(INFO_RATIO * 100);
 
+  // AICOBR_CLUSTER_PILLAR_2026_08
+  // When the user picked an existing page, every planned post becomes a SPOKE
+  // supporting it. This is the differentiating half of the feature: the plan is
+  // no longer "posts about your keywords", it's "the pages this page is missing".
+  // The page's own copy is included so the model can plan around what it ALREADY
+  // says rather than duplicating it — the gap is the value.
+  const pillarBlock = pillar ? `
+PILLAR PAGE — this plan builds a supporting cluster UNDERNEATH an existing page
+  Title: ${pillar.title}
+  URL:   ${pillar.url}
+${pillar.excerpt ? `  What that page already covers:\n    ${pillar.excerpt.slice(0, 1200).replace(/\n+/g, ' ')}` : '  (page copy unavailable — plan from the title and the business context)'}
+` : '';
+
+  const pillarTask = pillar ? `
+  EVERY post in this plan is a SPOKE supporting the pillar page above. That means:
+    - Each post must target a DISTINCT, more specific search than the pillar itself.
+      Do not propose a post that competes with or restates the pillar page.
+    - Prefer the questions a visitor to that page would still have afterwards:
+      how-to, comparison, cost/pricing, problem-diagnosis, examples, objections.
+    - Do NOT duplicate what the pillar page already covers (see its copy above) —
+      go a level deeper, or sideways into an adjacent question it doesn't answer.
+    - Set "cluster" to exactly "${pillar.title}" for every item.
+  Each spoke will automatically link up to the pillar page when it is generated,
+  so plan them as a coherent set that collectively supports that one page.
+` : '';
+
   return `You are an expert SEO content strategist building a publishing calendar for a specific business.
 
 BUSINESS
   What it does/sells: ${business.what || '(not given)'}
   Industry/sector:    ${business.industry || '(not given)'}
   Location:           ${business.location || '(not given)'}
-
+${pillarBlock}
 SEED KEYWORDS the owner cares about:
 ${seeds.map(s => `  - ${s}`).join('\n')}
 
@@ -319,6 +345,11 @@ TASK
   post a single focus keyphrase plus a few secondary keywords. Vary the content
   type sensibly across the plan. If a slot date sits ~1–2 weeks before a listed
   event, you MAY make that post an event preview and set event_anchor.
+${pillarTask}
+  ORDERING: keep each cluster CONTIGUOUS — finish every post in one cluster before
+  starting the next. Do not interleave clusters across the calendar. A cluster that
+  completes sooner starts working sooner. Cluster order is a hard constraint; event
+  anchoring is opportunistic and yields to it (skip the anchor if no slot fits).
 
   There are ${slots.length} slots:
 ${slotLines}
@@ -348,7 +379,7 @@ OUTPUT
 }
 
 // ─── normalise + validate a returned item against the palette ────────────────
-function sanitiseItem(raw, palette, slotDate) {
+function sanitiseItem(raw, palette, slotDate, pillar = null) {
   const allowedTypes = new Set(palette.map(p => p.type));
   const fallbackInfo = palette.find(p => p.intent === 'informational')?.type || palette[0]?.type || 'blog_post';
 
@@ -364,6 +395,16 @@ function sanitiseItem(raw, palette, slotDate) {
   const contentGap = String(raw?.content_gap || '').trim();
   const rationale  = String(raw?.rationale || '').trim();
   const intent     = INTENT[type] || 'informational';
+
+  // AICOBR_CLUSTER_PILLAR_2026_08
+  // When a pillar page was chosen, the cluster name is OURS, not the model's.
+  // The prompt asks it to echo the pillar title, but models paraphrase — and a
+  // paraphrased cluster name means the same cluster planned twice produces two
+  // different groups. Forcing it here keeps cluster identity stable and makes
+  // the grouped review view reliable.
+  const cluster = pillar
+    ? pillar.title
+    : String(raw?.cluster || '').trim();
 
   let eventAnchor = null;
   if (raw?.event_anchor && typeof raw.event_anchor === 'object' && raw.event_anchor.name) {
@@ -392,7 +433,7 @@ function sanitiseItem(raw, palette, slotDate) {
     seo_focus_keyword: focus,    // convenience: feeds the SEO pipeline on publish
     content_type: type,
     intent,
-    cluster: String(raw?.cluster || '').trim(),
+    cluster,
     secondary_keywords: secondary,
     content_gap: contentGap,
     rationale,
@@ -402,7 +443,7 @@ function sanitiseItem(raw, palette, slotDate) {
     special_instructions: specialInstructions,             // Bucket B
     content_type_meta: {                                   // Bucket C (review + future use)
       strategist: {
-        intent, cluster: String(raw?.cluster || '').trim(),
+        intent, cluster,
         content_gap: contentGap, rationale, event_anchor: eventAnchor,
         planned_at: new Date().toISOString(),
       },
@@ -482,7 +523,30 @@ function parsePlanInputs(body) {
     titles: Array.isArray(b.exclude?.titles) ? b.exclude.titles : [],
     focus_keywords: Array.isArray(b.exclude?.focus_keywords) ? b.exclude.focus_keywords : [],
   };
-  return { business, seeds, params, tier, exclude, license_key: b.license_key, serp_gl: b.serp_gl };
+  // AICOBR_CLUSTER_PILLAR_2026_08
+  // Optional: an EXISTING page on the user's site that this plan should build a
+  // supporting cluster underneath. Supplied by the plugin's /pages picker, so
+  // post_id/url/title are already the site's own values — we validate shape only.
+  // The excerpt is the page's own copy, trimmed, and is used to ground planning
+  // so the spokes genuinely support THIS page rather than being guessed from the
+  // title. Anything malformed degrades to "no pillar" (an ordinary plan).
+  let pillar = null;
+  const rawPillar = b.pillar;
+  if (rawPillar && typeof rawPillar === 'object') {
+    const pid   = parseInt(rawPillar.post_id, 10);
+    const url   = String(rawPillar.url   || '').trim();
+    const title = String(rawPillar.title || '').trim();
+    if (pid > 0 && title && /^https?:\/\//i.test(url)) {
+      pillar = {
+        post_id: pid,
+        title:   title.slice(0, 300),
+        url:     url.slice(0, 2000),
+        excerpt: String(rawPillar.excerpt || '').trim().slice(0, 2000),
+      };
+    }
+  }
+
+  return { business, seeds, params, tier, exclude, pillar, license_key: b.license_key, serp_gl: b.serp_gl };
 }
 
 // ═══ POST /api/strategist/preview ════════════════════════════════════════════
@@ -546,7 +610,7 @@ router.post('/preview', async (req, res) => {
 router.post('/plan', async (req, res) => {
   if (unauthorised(req)) return res.status(401).json({ success: false, error: 'Unauthorised' });
 
-  const { business, seeds, params, exclude, license_key, serp_gl } = parsePlanInputs(req.body);
+  const { business, seeds, params, exclude, pillar, license_key, serp_gl } = parsePlanInputs(req.body);
 
   // ── validation gate (before any charge) ──
   if (!license_key) return res.status(400).json({ success: false, error: 'license_key is required' });
@@ -632,7 +696,7 @@ router.post('/plan', async (req, res) => {
     const { grounded, events } = await runResearch(seeds, gl, business.industry, business.location, windowStart, windowEnd, costCtx);
 
     const slots = dates.map((date, i) => ({ i, date }));
-    const prompt = buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude });
+    const prompt = buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude, pillar });
 
     // ── ACB_STRATEGIST_TOKENS_SCALE_2026_07_19 ──────────────────────────────
     // The plan's output size scales with SLOT COUNT, not months: each item is
@@ -677,7 +741,7 @@ router.post('/plan', async (req, res) => {
     // Stitch our authoritative dates back in (item i -> slot i), sanitise, dedupe.
     let items = rawItems
       .slice(0, slots.length)
-      .map((raw, i) => sanitiseItem(raw, palette, slots[i].date));
+      .map((raw, i) => sanitiseItem(raw, palette, slots[i].date, pillar));
     items = dedupePlan(items, exclude);
 
     const infoCount = items.filter(i => i.intent === 'informational').length;
