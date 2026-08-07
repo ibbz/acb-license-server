@@ -263,12 +263,17 @@ async function runResearch(seeds, gl, industry, location, windowStart, windowEnd
 }
 
 // ─── planning prompt ──────────────────────────────────────────────────────────
-function buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude, pillar }) {
+function buildPlanningPrompt({ business, palette, seeds, researchSeeds, grounded, events, slots, exclude, pillar }) {
+  // AICOBR_CLUSTER_SEEDLESS_2026_08 — grounding is keyed by researchSeeds (which
+  // falls back to the pillar title), NOT the user's seeds. Mapping over `seeds`
+  // here would silently drop every SERP result when planning a cluster with no
+  // keywords entered — research paid for and thrown away.
+  const gSeeds = (researchSeeds && researchSeeds.length) ? researchSeeds : seeds;
   const paletteLines = palette
     .map(p => `  - ${p.type} (${p.intent}, ${p.credits} credits): ${p.label}`)
     .join('\n');
 
-  const groundingLines = seeds.map(kw => {
+  const groundingLines = gSeeds.map(kw => {
     const g = grounded[kw];
     if (!g) return `- "${kw}": no live search data (use best-practice judgement).`;
     const parts = [];
@@ -354,8 +359,11 @@ BUSINESS
   Industry/sector:    ${business.industry || '(not given)'}
   Location:           ${business.location || '(not given)'}
 ${pillarBlock}
-SEED KEYWORDS the owner cares about:
-${seeds.map(s => `  - ${s}`).join('\n')}
+${seeds.length
+  ? `SEED KEYWORDS the owner cares about:\n${seeds.map(s => `  - ${s}`).join('\n')}`
+  : `SEED KEYWORDS: none given. The owner chose the pillar page above and asked you to work out what
+it needs. Derive the topics from that page's subject and its copy — do not invent an unrelated theme,
+and do not propose a post that simply restates the pillar page itself.`}
 
 LIVE SEARCH RESEARCH (per seed — use to find real topics, sub-topics and the gaps competitors miss; do NOT copy competitor wording):
 ${groundingLines}
@@ -578,7 +586,21 @@ function parsePlanInputs(body) {
     }
   }
 
-  return { business, seeds, params, tier, exclude, pillar, license_key: b.license_key, serp_gl: b.serp_gl };
+  // AICOBR_CLUSTER_SEEDLESS_2026_08
+  // Keywords are optional WHEN a pillar page was chosen. Selecting the page the
+  // cluster supports already tells us more than three typed keywords would: its
+  // title, URL and actual copy all reach the planning prompt. Requiring keywords
+  // on top of that is friction, and worse — a user forced to type something will
+  // most likely type the pillar's own topic, which pushes the planner toward
+  // posts that RESTATE the pillar instead of supporting it.
+  //
+  // researchSeeds is what the SERP fan-out grounds on; seeds stays as the user's
+  // own list so the prompt can keep telling them apart (explicit asks vs a seed
+  // we derived). Both are empty only when there is no pillar either, which the
+  // route still rejects.
+  const researchSeeds = seeds.length ? seeds : (pillar ? [pillar.title] : []);
+
+  return { business, seeds, researchSeeds, params, tier, exclude, pillar, license_key: b.license_key, serp_gl: b.serp_gl };
 }
 
 // ═══ POST /api/strategist/preview ════════════════════════════════════════════
@@ -642,12 +664,15 @@ router.post('/preview', async (req, res) => {
 router.post('/plan', async (req, res) => {
   if (unauthorised(req)) return res.status(401).json({ success: false, error: 'Unauthorised' });
 
-  const { business, seeds, params, exclude, pillar, license_key, serp_gl } = parsePlanInputs(req.body);
+  const { business, seeds, researchSeeds, params, exclude, pillar, license_key, serp_gl } = parsePlanInputs(req.body);
 
   // ── validation gate (before any charge) ──
   if (!license_key) return res.status(400).json({ success: false, error: 'license_key is required' });
   if (!business.location) return res.status(400).json({ success: false, error: 'Business location is required before the first plan run.' });
-  if (seeds.length === 0) return res.status(400).json({ success: false, error: 'At least one seed keyword is required.' });
+  // AICOBR_CLUSTER_SEEDLESS_2026_08 — a chosen pillar page IS the seed.
+  if (researchSeeds.length === 0) {
+    return res.status(400).json({ success: false, error: 'Add at least one target keyword, or choose a page to build a cluster around.' });
+  }
 
   const client = await pool.connect();
   let charged = null; // { allocations } once we deduct
@@ -725,10 +750,10 @@ router.post('/plan', async (req, res) => {
     const gl = serp_gl || process.env.SERP_DEFAULT_GL || 'us';
     const windowStart = dates[0];
     const windowEnd   = dates[dates.length - 1];
-    const { grounded, events } = await runResearch(seeds, gl, business.industry, business.location, windowStart, windowEnd, costCtx);
+    const { grounded, events } = await runResearch(researchSeeds, gl, business.industry, business.location, windowStart, windowEnd, costCtx);
 
     const slots = dates.map((date, i) => ({ i, date }));
-    const prompt = buildPlanningPrompt({ business, palette, seeds, grounded, events, slots, exclude, pillar });
+    const prompt = buildPlanningPrompt({ business, palette, seeds, researchSeeds, grounded, events, slots, exclude, pillar });
 
     // ── ACB_STRATEGIST_TOKENS_SCALE_2026_07_19 ──────────────────────────────
     // The plan's output size scales with SLOT COUNT, not months: each item is
