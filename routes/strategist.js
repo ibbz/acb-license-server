@@ -286,6 +286,35 @@ function buildPlanningPrompt({ business, palette, seeds, grounded, events, slots
 
   const excludeTitles = (exclude.titles || []).slice(0, 200).map(normaliseKey).filter(Boolean);
   const excludeKw     = (exclude.focus_keywords || []).slice(0, 200).map(normaliseKey).filter(Boolean);
+  // AICOBR_CLUSTER_INTENT_DEDUPE_2026_08
+  // String dedupe (excludeBlock below, plus dedupePlan afterwards) catches exact
+  // repeats. It cannot catch "boiler service pricing explained" proposed when
+  // "how much does a boiler service cost" already exists — different words, one
+  // search intent, two pages that cannibalise each other rather than adding
+  // coverage. Judging intent equivalence is something the model is good at; it
+  // just has to be asked. Only same-pillar spokes are listed: overlap matters
+  // within a cluster, and dumping the whole site in would bloat every request.
+  const siblings = Array.isArray(exclude.cluster_siblings) ? exclude.cluster_siblings.slice(0, 60) : [];
+  const siblingBlock = siblings.length ? `
+THIS PILLAR ALREADY HAS THESE SUPPORTING PAGES:
+${siblings.map(sb => `  - ${String(sb.title || '').trim()}${sb.keyword ? `  [targets: ${String(sb.keyword).trim()}]` : ''}`).join('\n')}
+
+Do not propose a post that serves the SAME SEARCH INTENT as any of the above,
+even if worded differently. Two pages answering one question compete with each
+other and both rank worse than a single page would.
+
+  SAME intent (reject): "how much does a boiler service cost" vs "boiler
+    servicing prices" vs "cost of a commercial boiler service" — one question.
+  DIFFERENT intent (fine): "how much does a boiler service cost" vs "what
+    happens during a boiler service" vs "is a boiler service worth it" —
+    a price, a process and a judgement are three different questions.
+
+Your job on this run is to fill the GAPS around what already exists: the
+questions a visitor would still have after reading those pages. If you cannot
+find enough genuinely distinct angles to fill every slot, return FEWER items
+rather than padding with near-duplicates.
+` : '';
+
   const excludeBlock = (excludeTitles.length || excludeKw.length)
     ? `\nDO NOT propose anything matching these already-covered topics (the user already has them):\nTitles: ${excludeTitles.join(' | ') || '(none)'}\nKeywords: ${excludeKw.join(' | ') || '(none)'}\n`
     : '';
@@ -336,7 +365,7 @@ ${eventLines}
 
 ALLOWED CONTENT TYPES (use ONLY these — they are gated to the user's plan):
 ${paletteLines}
-${excludeBlock}
+${excludeBlock}${siblingBlock}
 TASK
   Build a topic-cluster content plan using the pillar-and-cluster model: grow the
   seed keywords into clusters, and fill EACH dated slot below with exactly one
@@ -356,7 +385,10 @@ ${slotLines}
 
 OUTPUT
   Return ONLY valid JSON, no commentary, no markdown fences, in EXACTLY this shape.
-  "items" MUST have exactly ${slots.length} entries, one per slot, in slot order
+  "items" MUST have exactly ${slots.length} entries, one per slot, in slot order${siblings.length ? `
+  (The ONE exception: the same-intent rule above wins. If there are not enough
+   genuinely distinct angles left for this pillar, return fewer items — filling
+   slots with near-duplicates is worse than a shorter plan.)` : ''}
   (item[0] is slot 0, etc.). Do NOT include dates — the system assigns them.
 
 {
