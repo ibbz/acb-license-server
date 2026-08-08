@@ -473,6 +473,44 @@ Output the content in clean Markdown first, then the SEO_DATA block. Nothing els
 - FAQ section: when an article includes a FAQ as one of its sections, title that section exactly "## Frequently Asked Questions" and write each question as an H3 heading ("### How do I …?") with its answer in the paragraph(s) directly beneath it. (This does not apply to a dedicated FAQ Page, which keeps its own question format.)
 - Step-by-step procedures: when the content presents an explicit sequence of actions to follow in order, format each step as an H3 heading titled exactly "### Step 1: short title" (then "### Step 2: …", and so on), with that step's details in the paragraph(s) beneath it. Use this only for genuine procedures — not for general listicle or "N ways to…" sections.`;
 
+    // AICOBR_ANSWER_SHAPE_2026_08
+    // Answer-shaped writing helps a reader who lands mid-article and takes one
+    // section — which is also how answer engines read. It is deliberately NOT
+    // applied to every type: "answer the central question in the first 40-60
+    // words" is meaningless for a quiz or a video script, and actively wrong for
+    // a product or vehicle listing, where the destination template owns the
+    // shape and the opening should sell, not define. Scoped to the prose types
+    // a reader arrives at from a search — the same set that gets SERP grounding,
+    // plus the explanatory L&D/doc types where self-contained sections matter.
+    const ANSWER_SHAPE_TYPES = new Set([
+        'blog_post', 'tutorial', 'faq_page', 'service_page', 'about_us',
+        'landing_page', 'review_comparison', 'explainer_guide',
+        'policy_procedure', 'onboarding_doc', 'sop', 'training_module',
+        'course_overview', 'workshop_guide', 'case_study_ld', 'press_release',
+    ]);
+
+    const answerShape = ANSWER_SHAPE_TYPES.has(contentTypeId) ? `
+**ANSWER SHAPE — write so a section can be lifted out and still make sense:**
+This is how people actually read: they arrive at one section, take what they need, and leave.
+Every rule below also makes the piece better for a human skimmer, which is why it applies
+regardless of any SEO or AI-visibility fashion.
+- Answer first. Open the article by answering its central question directly in the first 40-60
+  words, in plain language, before any context, story or scene-setting. A reader who stops after
+  two sentences should already have the answer. Then expand.
+- Where a section poses a question, answer it in that section's FIRST sentence, then explain.
+  Do not build up to the answer and reveal it at the end.
+- Make sections self-contained. Avoid "as mentioned above", "as we saw earlier", or a bare
+  "this"/"that" pointing back to an earlier section — name the thing again. A section pulled out
+  on its own must still read correctly.
+- Prefer specific, checkable statements over vague ones: a number, a timeframe, a named standard
+  or a concrete condition beats "often", "many" or "it depends". Where it genuinely does depend,
+  say what it depends ON.
+- Define a term the first time it is used, in one sentence, before using it further.
+- Write headings as the question or task a reader would actually type, not as clever labels:
+  "How much does a boiler service cost?" not "Understanding the cost equation".
+- Never state a statistic, price, date or study you are not confident is real. An invented figure
+  is worse than none — write the qualitative statement instead.`  : '';
+
     switch (contentTypeId) {
 
         case 'blog_post':
@@ -492,7 +530,7 @@ Output the content in clean Markdown first, then the SEO_DATA block. Nothing els
 8. End with a clear, helpful CTA that feels natural — not salesy
 9. Aim for a Flesch reading ease score of 60 or higher
 10. Do NOT use filler phrases like "In today's world", "In conclusion", "It's worth noting", or "Delve into"
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'tutorial':
@@ -511,7 +549,7 @@ ${seoBlock}`;
 5. Add a "Troubleshooting" section covering common mistakes
 6. End with next steps or related tutorials
 7. Use code blocks if any code or commands are involved
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'faq_page':
@@ -529,7 +567,7 @@ ${seoBlock}`;
 6. Order questions from most basic to most advanced
 7. The output must be valid schema.org FAQPage structured data ready (questions as H2, answers as paragraphs)
 8. End with a brief "Still have questions?" CTA
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'woocommerce_product':
@@ -550,7 +588,7 @@ ${seoBlock}`;
 6. End with a subtle urgency or value statement — not pushy
 7. Tone should be confident and persuasive — this copy needs to sell
 8. Naturally include the primary keyword 2-3 times
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'service_page':
@@ -570,7 +608,7 @@ ${seoBlock}`;
 6. Include a "Why Choose Us?" or trust-building section
 7. End with a strong CTA (book a call, get a quote, contact us)
 8. Tone: professional, confident, and customer-focused
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'about_us':
@@ -590,7 +628,7 @@ ${seoBlock}`;
 6. End with an invitation — visit, contact, or follow
 7. Tone: warm, human, and authentic — this page builds trust
 8. Write in third person unless instructed otherwise
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'recipe':
@@ -610,7 +648,7 @@ ${seoBlock}`;
 5. Include ## Nutritional Information (approximate per serving)
 6. Schema-ready format: ingredients as list, method as ordered list
 7. Tone: friendly, encouraging, and practical
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'vehicle_listing':
@@ -632,7 +670,7 @@ ${seoBlock}`;
 7. End with a clear CTA — call, message, or visit to view
 8. Tone: honest, enthusiastic, and professional
 9. Never exaggerate condition or hide known issues
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'landing_page':
@@ -654,7 +692,7 @@ ${seoBlock}`;
 7. ## Social Proof placeholder — "[Testimonial 1]", "[Testimonial 2]"
 8. End with a strong, specific CTA above and below the fold
 9. Tone: direct, confident, benefit-led — every word must earn its place
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'press_release':
@@ -675,7 +713,7 @@ ${seoBlock}`;
 8. End with: ### (press release standard end marker)
 9. Contact details placeholder: "For media enquiries contact: [NAME] at [EMAIL]"
 10. Tone: formal, factual, and newsworthy
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'job_listing':
@@ -696,7 +734,7 @@ ${seoBlock}`;
 6. ## About Us — 2-3 sentences about the company
 7. End with clear application instructions placeholder
 8. Tone: welcoming and human — job ads should attract, not intimidate
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'review_comparison':
@@ -717,7 +755,7 @@ ${seoBlock}`;
 7. Add a FAQ section addressing common buying questions
 8. Disclose if content may contain affiliate links (placeholder)
 9. Tone: honest, balanced, and genuinely helpful — readers trust reviewers who acknowledge flaws
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'email_newsletter':
@@ -738,7 +776,7 @@ ${seoBlock}`;
 8. Include a clear, single CTA button placeholder: [CTA: ${m.cta || 'Read more'}]
 9. Sign off warmly
 10. Tone: personal, valuable, conversational — like an email from a trusted friend
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'video_script':
@@ -759,7 +797,7 @@ ${seoBlock}`;
 7. Write in natural spoken English — contractions, short sentences, conversational
 8. For ${m.platform || 'YouTube'} optimise for ${m.duration || '5 minutes'} — pace accordingly
 9. Tone: ${m.style || 'Educational'} — match the energy to the platform and style
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'social_media': {
@@ -805,7 +843,7 @@ General rules:
 3. Include a CTA on every post
 4. Write authentically — not like a press release
 5. Hashtags at the end, not scattered through the copy (except TikTok/Instagram)
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
         }
 
@@ -826,7 +864,7 @@ ${seoBlock}`;
 7. ## 7. Review Date — placeholder: "This policy will be reviewed on [DATE]"
 8. Document version placeholder: "Version 1.0 | [DATE] | Approved by: [NAME]"
 9. Tone: formal, clear, and unambiguous — no room for misinterpretation
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'onboarding_doc':
@@ -847,7 +885,7 @@ ${seoBlock}`;
 7. ## Your 30/60/90 Day Goals — outline of expectations
 8. End with an encouragement and open door message
 9. Tone: warm, clear, and reassuring — first days are stressful enough
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'course_overview':
@@ -868,7 +906,7 @@ ${seoBlock}`;
 7. ## What's Included — videos, quizzes, assignments, certificate etc. (as applicable)
 8. ## Meet Your Instructor — placeholder bio section
 9. Tone: motivating and clear — learners should feel excited and prepared
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'training_module':
@@ -917,7 +955,7 @@ ${seoBlock}`;
 ---QUIZ_DATA_END---
 
 JSON rules: exactly ${m.num_questions || '5'} questions | exactly 4 answers per question | exactly 1 correct:true | CRITICAL: vary which position holds the correct answer across questions — distribute correct answers roughly evenly across A/B/C/D, never default to the first slot (a quiz where every correct answer is option A is unusable) | valid JSON, escape inner quotes
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'case_study_ld':
@@ -936,7 +974,7 @@ ${seoBlock}`;
 6. ## Learning Points — 4-6 key lessons from this scenario
 7. ## Facilitator Notes — tips for how to run this case study in a training session
 8. Tone: realistic, neutral, and thought-provoking — avoid making it too obvious
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'explainer_guide':
@@ -957,7 +995,7 @@ ${seoBlock}`;
 7. ## Why It Matters — practical relevance for the ${m.audience_level || 'beginner'} audience
 8. ## Summary — 5 bullet point recap
 9. Tone: patient, clear, and encouraging — never condescending
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'quiz_assessment':
@@ -1001,7 +1039,7 @@ ${seoBlock}`;
 ---QUIZ_DATA_END---
 
 JSON rules: exactly ${m.num_questions || '10'} questions | True/False: 2 answers only, type=true_false | Open: no answers array, add model_answer field, type=open | Multiple Choice: exactly 4 answers, exactly 1 correct:true | CRITICAL: vary which position holds the correct answer across questions — distribute correct answers roughly evenly across all positions, never default to the first slot (a quiz where every correct answer is option A is unusable) | Valid JSON, escape inner quotes
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'learning_objective':
@@ -1024,7 +1062,7 @@ ${seoBlock}`;
    - Create: design, develop, construct, produce
 5. Each objective must be Specific, Measurable, Achievable, Relevant, and Time-bound (SMART)
 6. Include a note on how each objective could be assessed
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'event_description':
@@ -1049,7 +1087,7 @@ ${seoBlock}`;
 7. Close with a clear, urgent CTA to register or find out more
 8. Tone: energetic, professional, persuasive — make the reader excited to attend
 9. If event_url is provided, reference it naturally in the CTA
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'workshop_guide':
@@ -1075,7 +1113,7 @@ ${seoBlock}`;
 7. ## Discussion Prompts — questions to spark conversation
 8. ## Closing — how to summarise and agree next steps
 9. Tone: practical and actionable — a facilitator should be able to run this cold
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         case 'sop':
@@ -1100,7 +1138,7 @@ ${seoBlock}`;
 8. ## 7. Related Documents — placeholder list
 9. ## 8. Review Schedule — "This SOP will be reviewed every [X months]"
 10. Tone: precise, unambiguous, and sequential — no room for interpretation
-${formattingRules}
+${formattingRules}${answerShape}
 ${seoBlock}`;
 
         default:
