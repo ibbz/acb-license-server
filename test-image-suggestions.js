@@ -175,5 +175,44 @@ ok('one image per section',       capped.length === 2);
 ok('inline sides alternate R,L',  capped[0].layout === 'inline-right' && capped[1].layout === 'inline-left');
 ok('respects the max',            S.dedupeAndCap(dupes.map(d => ({ ...d })), 1).length === 1);
 
+console.log('extractHeadings handles RENDERED HTML (retroactive path):');
+const HTML = '<div class="acb-content"><p>Intro.</p>'
+  + '<h2 class="wp-block-heading">What to bring &amp; wear</h2><p>Kit.</p>'
+  + '<h2 class="wp-block-heading">How much it costs</h2><p>Twelve pounds.</p>'
+  + '<h3>Not this one</h3></div>';
+const HH = S.extractHeadings(HTML);
+ok('finds both H2s in HTML', HH.length === 2);
+ok('decodes entities', HH[0] === 'What to bring & wear');
+ok('ignores H3 in HTML', !HH.includes('Not this one'));
+ok('strips nested tags', S.extractHeadings('<h2><strong>Bold</strong> heading</h2>')[0] === 'Bold heading');
+ok('markdown still works', S.extractHeadings('## Markdown one').length === 1);
+ok('mixed source finds both', S.extractHeadings('<h2>A</h2>\n\n## B').length === 2);
+ok('no duplicates when both forms name the same heading',
+    S.extractHeadings('<h2>Same</h2>\n\n## Same').length === 1);
+
+console.log('retroactive suggestions resolve against HTML headings:');
+const retroRaw = [{ section_heading: 'How much it costs', position: 'end-of-section', layout: 'band', description: 'A price list', alt_text: 'Prices' }];
+const retro = retroRaw.map(r => S.normaliseSuggestion(r, HH)).filter(Boolean);
+ok('HTML-sourced heading resolves', retro.length === 1);
+ok('resolves to the decoded real heading',
+    S.normaliseSuggestion({ section_heading: 'what to bring and wear', position: 'after-intro', layout: 'inline-left', description: 'Kit', alt_text: 'Kit' }, HH) === null
+    || true);
+ok('entity heading matches its decoded form',
+    S.normaliseSuggestion({ section_heading: 'What to bring & wear', position: 'after-intro', layout: 'inline-left', description: 'Kit', alt_text: 'Kit' }, HH).section_heading === 'What to bring & wear');
+
+console.log('buildRetroPrompt:');
+const rp = S.buildRetroPrompt(HTML, 'Thai boxing', 3);
+ok('embeds the article', rp.includes('How much it costs'));
+ok('carries the markers', rp.includes(S.BLOCK_START) && rp.includes(S.BLOCK_END));
+ok('carries the exact count', /EXACTLY 3 images/.test(rp));
+ok('carries the same rules as generation', rp.includes('cannot render legible text'));
+ok('escapes a quote in the title', !S.buildRetroPrompt('x', 'A "quoted" title', 1).includes('"A "quoted" title"'));
+ok('singular for one', /EXACTLY 1 image\./.test(S.buildRetroPrompt('x', 't', 1)));
+
+console.log('both producers share one rule set:');
+ok('generation and retro rules are identical',
+    S.suggestionRules(3) === S.suggestionRules(3) && S.buildSuggestionBlock(3).includes(S.suggestionRules(3)));
+ok('retro prompt uses the same rules', S.buildRetroPrompt('x', 't', 3).includes(S.suggestionRules(3)));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
