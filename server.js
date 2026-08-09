@@ -133,14 +133,37 @@ const generateLimiter = rateLimit({
 });
 app.use('/api/generate', generateLimiter);
 
-// Image-only regeneration spends real OpenAI money on every call and is the
-// obvious loop to spam, so cap it per-IP too. The 1-credit charge is the primary
-// abuse brake; this is belt-and-braces. Slightly higher ceiling than full
-// generation since an image regen is cheaper and legitimately iterated on.
+// Image generation spends real OpenAI money on every call and is the obvious
+// loop to spam, so cap it too. The 1-credit charge is the PRIMARY abuse brake —
+// this limiter is belt-and-braces, and its ceiling should never be the thing a
+// legitimate user hits first.
+//
+// AICOBR_INBODY_IMAGES_2026_08: raised 20 -> 60 per 15 minutes. In-body images
+// are charged flat, one credit per image, so a single article with three of them
+// is three requests, and a user working through a few posts in one sitting used
+// to hit 20 and get a bare 429. 60 is still a hard cap on runaway spend (60 paid
+// images = $3 of OpenAI, and 60 credits of the customer's own balance) while
+// leaving the credit charge to do the real work.
+//
+// Keyed per licence key where one is present, falling back to IP. Every request
+// to this route originates from the customer's WordPress SERVER, not an end
+// user's browser, so IP is a poor identity here: an agency running several sites
+// on one host would otherwise share a single bucket. Note also that the
+// Cloudflare CNAME must stay DNS-only (see the first-party domain migration) —
+// if it were ever proxied, app.set('trust proxy', 1) would resolve every req.ip
+// to a Cloudflare address and collapse all customers into one bucket.
 const regenerateImageLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: 'Image regeneration rate limit exceeded. Please wait a moment before trying again.' }
+  max: 60,
+  keyGenerator: (req) => {
+    const key = req.body && typeof req.body.license_key === 'string' ? req.body.license_key.trim() : '';
+    return key !== '' ? `lic:${key}` : `ip:${req.ip}`;
+  },
+  message: {
+    success: false,
+    code: 'rate_limited',
+    error: "You're generating images faster than we can keep up. Please wait a few minutes and try again.",
+  }
 });
 app.use('/api/regenerate-image', regenerateImageLimiter);
 
