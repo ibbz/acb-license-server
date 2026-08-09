@@ -25,6 +25,12 @@ const router  = express.Router();
 const { Pool } = require('pg');
 const { CONTENT_TYPES, canAccessContentType, buildPrompt, resolveTargetWords, maxTokensFor } = require('../content-types');
 const { scoreSeo, parseSeoBlock } = require('../lib/seo-score');
+// AICOBR_INBODY_IMAGES_2026_08 — shared definition of an in-body image
+// suggestion. Used here (free, emitted alongside the SEO block by the model
+// that just wrote the article) and by routes/image-suggestions.js for the
+// retroactive case. Suggestions are DESCRIPTIONS only: nothing here generates
+// an image or spends a credit.
+const imageSuggestions = require('../lib/image-suggestions');
 const serp = require('../lib/serp');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
@@ -223,6 +229,7 @@ async function generateContent(payload, costCtx) {
         content_type, content_type_meta,
         approved_outline, serp_gl, serp_hl,
         cluster_pillar,
+        suggestion_count,
     } = payload;
 
     // Build the user prompt using the content type template
@@ -232,6 +239,18 @@ async function generateContent(payload, costCtx) {
     const effectiveWordCount = resolveTargetWords(activeContentType, target_word_count);
     let userPrompt = buildPrompt(activeContentType, title, primary_keyword, effectiveWordCount, content_type_meta);
     console.log(`[generate] Content type: ${activeContentType}`);
+
+    // ── In-body image suggestions (AICOBR_INBODY_IMAGES_2026_08) ────────────
+    // Appended AFTER the type's own prompt (which ends with the SEO block
+    // instruction) so the model emits it last, exactly like ---SEO_DATA---.
+    // Returns '' when the count is 0, so ineligible types and opted-out runs
+    // concatenate nothing. This costs a few hundred output tokens on a call we
+    // are already making — there is no second request and no credit.
+    const suggestionBlock = imageSuggestions.buildSuggestionBlock(suggestion_count);
+    if (suggestionBlock) {
+        userPrompt += suggestionBlock;
+        console.log(`[generate] Requesting ${suggestion_count} in-body image suggestion(s)`);
+    }
 
     // ── SEO grounding ───────────────────────────────────────────────────────
     // If an approved outline was supplied (outline-review flow) it already carries
@@ -362,7 +381,9 @@ The <internal_link> instruction is MANDATORY and must be followed exactly once. 
         },
         body: JSON.stringify({
             model: TEXT_MODEL,
-            max_tokens: maxTokensFor(activeContentType),
+            // Budget includes the suggestion block's output allowance, so asking
+            // for suggestions can never truncate the article itself.
+            max_tokens: maxTokensFor(activeContentType, suggestion_count),
             temperature: 0.7,
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
@@ -393,7 +414,7 @@ The <internal_link> instruction is MANDATORY and must be followed exactly once. 
         // Hit the token ceiling — output is truncated. With per-type max_tokens this
         // should be rare; log loudly so it's visible in Railway rather than shipping
         // a half-finished article (or, for quiz/assessment, unparseable JSON).
-        console.warn(`[generate] ⚠ TRUNCATED: stop_reason=max_tokens for type="${activeContentType}" (target ${effectiveWordCount}w, budget ${maxTokensFor(activeContentType)} tok). Output is incomplete.`);
+        console.warn(`[generate] ⚠ TRUNCATED: stop_reason=max_tokens for type="${activeContentType}" (target ${effectiveWordCount}w, budget ${maxTokensFor(activeContentType, suggestion_count)} tok). Output is incomplete.`);
     }
     const text = data?.content?.map(b => b.text || '').join('');
     if (!text) throw new Error('Empty response from Anthropic API');
@@ -508,6 +529,13 @@ router.post('/', async (req, res) => {
         approved_outline,
         serp_gl,
         serp_hl,
+        // AICOBR_INBODY_IMAGES_2026_08 — opt-in. When true the article prompt
+        // asks the model to ALSO return descriptions for in-body images it
+        // would suggest. No image is generated and no extra credit is charged;
+        // the user picks one later in the image modal, which is where the
+        // 1-credit generation happens.
+        suggest_images,
+        image_suggestion_count,
         // Round-tripped back to /publish so WordPress matches the exact diary entry
         entry_id,
     } = req.body;
@@ -707,12 +735,27 @@ router.post('/', async (req, res) => {
         postStage(domain, { title, post_id, stage: 'writing' }, process.env.GENERATE_SECRET || '');
         console.log('[generate] Starting content + image + YouTube concurrently...');
 
+        // AICOBR_INBODY_IMAGES_2026_08
+        // Resolve how many in-body image suggestions to ask for. Zero unless the
+        // user opted in AND the content type is eligible (the module mirrors the
+        // formatter's article/doc tiers — a floated figure in a WooCommerce
+        // product description is simply wrong). The ceiling also scales to the
+        // type's length band, so a 700-word About Us page never gets three.
+        const suggestionCount = suggest_images
+            ? imageSuggestions.resolveSuggestionCount(
+                  activeContentType,
+                  resolveTargetWords(activeContentType, target_word_count),
+                  image_suggestion_count
+              )
+            : 0;
+
         const contentPromise = generateContent({
             title, primary_keyword, target_word_count,
             special_instructions, brand_voice, tone, style_profile,
             content_type, content_type_meta,
             approved_outline, serp_gl, serp_hl,
             cluster_pillar,
+            suggestion_count: suggestionCount,
         }, costCtx);
         // Attach a handler immediately. generateContent can reject *before* its first
         // await (a missing config value, a synchronous throw). Because we await the
@@ -749,6 +792,35 @@ router.post('/', async (req, res) => {
             console.log(`[generate] Quiz data extracted: ${quizData ? quizData.questions?.length + ' questions' : 'not found — will use markdown only'}`);
         } else {
             articleText = rawArticleText;
+        }
+
+        // ── In-body image suggestions (AICOBR_INBODY_IMAGES_2026_08) ───────
+        // Extract the descriptions the model returned and STRIP the block from
+        // the article before anything else touches it — SEO scoring, the publish
+        // payload and the stored post must never contain it.
+        //
+        // Fail-soft by contract, like every other optional step: a malformed or
+        // truncated block is stripped and dropped, and the article publishes
+        // normally with no suggestions. Suggestions are a nice-to-have; the post
+        // the customer paid for is not.
+        let imageSuggestionList = [];
+        if (suggestionCount > 0) {
+            try {
+                const parsed = imageSuggestions.parseSuggestionBlock(articleText, { max: suggestionCount });
+                articleText        = parsed.cleanContent;
+                imageSuggestionList = parsed.suggestions;
+                if (parsed.parseError) {
+                    console.warn(`[generate] image suggestions dropped (non-fatal): ${parsed.parseError}`);
+                } else {
+                    console.log(`[generate] ${imageSuggestionList.length}/${suggestionCount} in-body image suggestion(s) parsed`);
+                }
+            } catch (e) {
+                console.warn('[generate] image suggestion parsing skipped (non-fatal):', e.message);
+            }
+        } else {
+            // Belt-and-braces: strip the block even when we did not ask for it,
+            // so a stray emission can never reach the published post.
+            articleText = imageSuggestions.parseSuggestionBlock(articleText).cleanContent;
         }
 
         // ── SEO score ─────────────────────────────────────────────────────
@@ -822,6 +894,10 @@ router.post('/', async (req, res) => {
             ld_post_type:       ld_post_type    || '',
             // Structured quiz data (null for non-quiz content types)
             quiz_data:          quizData        || null,
+            // AICOBR_INBODY_IMAGES_2026_08 — descriptions only, no images yet.
+            // WordPress stores these on the diary entry; the user turns one into
+            // a real image (1 credit) from the image modal.
+            image_suggestions:  imageSuggestionList,
             // SEO score + checklist (null if scoring failed)
             seo_score:          seoReport ? seoReport.score : null,
             seo_grade:          seoReport ? seoReport.grade : null,

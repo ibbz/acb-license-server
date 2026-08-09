@@ -434,11 +434,39 @@ function acbLengthGuidance(contentTypeId, requested) {
 // and truncated longer/structured types (e.g. tutorials hit the ceiling mid-article).
 // 2.4 tokens/word + 2200 overhead gives every type headroom for the trailing
 // SEO/FAQ block without exceeding model limits (hard-capped at 24000).
-function maxTokensFor(contentTypeId) {
+// AICOBR_INBODY_IMAGES_2026_08
+// Output allowance for the in-body image suggestion block. Each suggestion is a
+// JSON object carrying a heading, a description (<=400 chars), alt text (<=250)
+// and a caption (<=200) — roughly 200 tokens once keys and punctuation are
+// counted — plus ~120 for the markers and array brackets.
+//
+// This MUST be added to the ceiling rather than absorbed by the existing 2200
+// overhead. That overhead is slack for the SEO block on an article already
+// written to the top of its band; a max-length blog post is budgeted at 8200
+// tokens, so three suggestions eating ~720 of it is precisely how a long piece
+// would start truncating mid-article. The failure would be silent apart from
+// the TRUNCATED warning in routes/generate.js.
+const SUGGESTION_TOKENS_EACH  = 200;
+const SUGGESTION_TOKENS_FIXED = 120;
+
+function suggestionTokenAllowance(suggestionCount) {
+    const n = parseInt(suggestionCount, 10);
+    if (!n || isNaN(n) || n < 1) return 0;
+    return SUGGESTION_TOKENS_FIXED + (n * SUGGESTION_TOKENS_EACH);
+}
+
+/**
+ * Output-token ceiling for a content type.
+ *
+ * `suggestionCount` is optional and additive: called with one argument this is
+ * unchanged from the previous build, which is what every existing caller does.
+ */
+function maxTokensFor(contentTypeId, suggestionCount) {
+    const extra = suggestionTokenAllowance(suggestionCount);
     const p = LENGTH_PROFILES[contentTypeId];
-    if (!p) return STRUCTURAL_MAX_TOKENS;
+    if (!p) return Math.min(24000, STRUCTURAL_MAX_TOKENS + extra);
     const ceilingWords = Math.min(p.max, GLOBAL_MAX_WORDS);
-    return Math.min(24000, Math.ceil(ceilingWords * 2.4) + 2200);
+    return Math.min(24000, Math.ceil(ceilingWords * 2.4) + 2200 + extra);
 }
 
 function buildPrompt(contentTypeId, title, primaryKeyword, targetWordCount, meta) {
@@ -1147,4 +1175,4 @@ ${seoBlock}`;
     }
 }
 
-module.exports = { CONTENT_TYPES, TIER_RANK, canAccessContentType, buildPrompt, LENGTH_PROFILES, resolveTargetWords, maxTokensFor, acbLengthGuidance };
+module.exports = { CONTENT_TYPES, TIER_RANK, canAccessContentType, buildPrompt, LENGTH_PROFILES, resolveTargetWords, maxTokensFor, acbLengthGuidance, suggestionTokenAllowance };
