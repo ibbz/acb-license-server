@@ -104,7 +104,7 @@ ok('resolves the real heading',    g.suggestions[0].section_heading === 'What to
 // AICOBR_INBODY_POSITION_2026_08 — 'before-heading' is normalised to the one
 // surviving position. The band LAYOUT is kept (it is legal at after-intro, and
 // the free tier depends on it); only the position moves.
-ok('band kept, legacy position normalised', g.suggestions[0].layout === 'band' && g.suggestions[0].position === 'after-intro');
+ok('band kept, legacy position normalised', g.suggestions[0].layout === 'band' && g.suggestions[0].position === 'after-heading');
 ok('first inline forced to right', g.suggestions[1].layout === 'inline-right');
 
 console.log('parseSuggestionBlock — hostile input never damages the article:');
@@ -146,22 +146,28 @@ console.log('AICOBR_INBODY_POSITION_2026_08 — one position, enforced not trust
 // Only 'after-intro' survives. The other two left no body text after the figure
 // inside its section, and h2/h3 carry `clear: both`, so a floated image ended up
 // alone on its own row with a blank column beside it.
-ok('POSITIONS is exactly one value', S.POSITIONS.length === 1 && S.POSITIONS[0] === 'after-intro');
-ok('legacy before-heading -> after-intro',
-    S.normaliseSuggestion({ ...base, position: 'before-heading', layout: 'inline-right' }, H).position === 'after-intro');
-ok('legacy end-of-section -> after-intro',
-    S.normaliseSuggestion({ ...base, position: 'end-of-section', layout: 'band' }, H).position === 'after-intro');
-ok('junk position -> after-intro',
-    S.normaliseSuggestion({ ...base, position: 'floating' }, H).position === 'after-intro');
+ok('POSITIONS is exactly one value', S.POSITIONS.length === 1 && S.POSITIONS[0] === 'after-heading');
+// AICOBR_INBODY_AFTER_HEADING_2026_08 — every legacy key normalises to the one
+// live position, and aicobr_insert_figure() honours the old keys directly too,
+// so images placed before this change land in the improved position rather than
+// needing a migration.
+ok('legacy before-heading -> after-heading',
+    S.normaliseSuggestion({ ...base, position: 'before-heading', layout: 'inline-right' }, H).position === 'after-heading');
+ok('legacy end-of-section -> after-heading',
+    S.normaliseSuggestion({ ...base, position: 'end-of-section', layout: 'band' }, H).position === 'after-heading');
+ok('legacy after-intro -> after-heading',
+    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'inline-left' }, H).position === 'after-heading');
+ok('junk position -> after-heading',
+    S.normaliseSuggestion({ ...base, position: 'floating' }, H).position === 'after-heading');
 // band stays legal: a full-width image after a section's opening paragraph reads
 // fine, and every free-tier inline request resolves to a band (mini has no
 // priced portrait row), so forbidding it here would break the free tier.
-ok('band is legal at after-intro',
-    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'band' }, H).layout === 'band');
-ok('inline is legal at after-intro',
-    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'inline-left' }, H).layout.startsWith('inline'));
+ok('band is legal at after-heading',
+    S.normaliseSuggestion({ ...base, position: 'after-heading', layout: 'band' }, H).layout === 'band');
+ok('inline is legal at after-heading',
+    S.normaliseSuggestion({ ...base, position: 'after-heading', layout: 'inline-left' }, H).layout.startsWith('inline'));
 ok('every returned position is a legal one',
-    ['before-heading','end-of-section','after-intro','nonsense',''].every(pos => {
+    ['before-heading','end-of-section','after-intro','after-heading','nonsense',''].every(pos => {
         const r = S.normaliseSuggestion({ ...base, position: pos }, H);
         return r && S.POSITIONS.includes(r.position) && S.POSITION_LAYOUTS[r.position].includes(r.layout);
     }));
@@ -223,6 +229,7 @@ ok('embeds the article', rp.includes('How much it costs'));
 ok('carries the markers', rp.includes(S.BLOCK_START) && rp.includes(S.BLOCK_END));
 ok('carries the exact count', /EXACTLY 3 images/.test(rp));
 ok('carries the same rules as generation', rp.includes('cannot render legible text'));
+ok('retro prompt names the live position', /after-heading/.test(rp) && !/after-intro/.test(rp));
 ok('escapes a quote in the title', !S.buildRetroPrompt('x', 'A "quoted" title', 1).includes('"A "quoted" title"'));
 ok('singular for one', /EXACTLY 1 image\./.test(S.buildRetroPrompt('x', 't', 1)));
 
