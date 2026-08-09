@@ -101,7 +101,10 @@ ok('block removed from content',   !g.cleanContent.includes('IMAGE_SUGGESTIONS')
 ok('article prose preserved',      g.cleanContent.includes('You turn up ten minutes early.'));
 ok('SEO block left alone',         g.cleanContent.includes('SEO_TITLE: Something'));
 ok('resolves the real heading',    g.suggestions[0].section_heading === 'What to expect in your first class');
-ok('keeps band + before-heading',  g.suggestions[0].layout === 'band' && g.suggestions[0].position === 'before-heading');
+// AICOBR_INBODY_POSITION_2026_08 — 'before-heading' is normalised to the one
+// surviving position. The band LAYOUT is kept (it is legal at after-intro, and
+// the free tier depends on it); only the position moves.
+ok('band kept, legacy position normalised', g.suggestions[0].layout === 'band' && g.suggestions[0].position === 'after-intro');
 ok('first inline forced to right', g.suggestions[1].layout === 'inline-right');
 
 console.log('parseSuggestionBlock — hostile input never damages the article:');
@@ -139,15 +142,29 @@ ok('punctuation-tolerant heading', S.normaliseSuggestion({ ...base, section_head
 ok('returns the REAL heading text',
     S.normaliseSuggestion({ ...base, section_heading: 'what to bring with you' }, H).section_heading === 'What to bring with you');
 
-console.log('position/layout pairing is enforced, not trusted:');
-ok('before-heading + inline -> band',
-    S.normaliseSuggestion({ ...base, position: 'before-heading', layout: 'inline-right' }, H).layout === 'band');
-ok('after-intro + band -> inline',
-    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'band' }, H).layout.startsWith('inline'));
-ok('end-of-section keeps band',
-    S.normaliseSuggestion({ ...base, position: 'end-of-section', layout: 'band' }, H).layout === 'band');
-ok('bad position -> end-of-section',
-    S.normaliseSuggestion({ ...base, position: 'floating' }, H).position === 'end-of-section');
+console.log('AICOBR_INBODY_POSITION_2026_08 — one position, enforced not trusted:');
+// Only 'after-intro' survives. The other two left no body text after the figure
+// inside its section, and h2/h3 carry `clear: both`, so a floated image ended up
+// alone on its own row with a blank column beside it.
+ok('POSITIONS is exactly one value', S.POSITIONS.length === 1 && S.POSITIONS[0] === 'after-intro');
+ok('legacy before-heading -> after-intro',
+    S.normaliseSuggestion({ ...base, position: 'before-heading', layout: 'inline-right' }, H).position === 'after-intro');
+ok('legacy end-of-section -> after-intro',
+    S.normaliseSuggestion({ ...base, position: 'end-of-section', layout: 'band' }, H).position === 'after-intro');
+ok('junk position -> after-intro',
+    S.normaliseSuggestion({ ...base, position: 'floating' }, H).position === 'after-intro');
+// band stays legal: a full-width image after a section's opening paragraph reads
+// fine, and every free-tier inline request resolves to a band (mini has no
+// priced portrait row), so forbidding it here would break the free tier.
+ok('band is legal at after-intro',
+    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'band' }, H).layout === 'band');
+ok('inline is legal at after-intro',
+    S.normaliseSuggestion({ ...base, position: 'after-intro', layout: 'inline-left' }, H).layout.startsWith('inline'));
+ok('every returned position is a legal one',
+    ['before-heading','end-of-section','after-intro','nonsense',''].every(pos => {
+        const r = S.normaliseSuggestion({ ...base, position: pos }, H);
+        return r && S.POSITIONS.includes(r.position) && S.POSITION_LAYOUTS[r.position].includes(r.layout);
+    }));
 ok('bad layout -> a legal layout',
     S.POSITION_LAYOUTS[S.normaliseSuggestion({ ...base, layout: 'diagonal' }, H).position]
         .includes(S.normaliseSuggestion({ ...base, layout: 'diagonal' }, H).layout));
