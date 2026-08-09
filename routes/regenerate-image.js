@@ -38,7 +38,7 @@ const costLog = require('../lib/cost-log');
 // upload that /api/generate uses (extracted to lib/image-gen.js). Using the
 // shared module is what guarantees a free-tier regen runs mini, exactly like a
 // free-tier full generation, with no chance of the two policies diverging.
-const { imagePolicyFor, generateImage, uploadImageToWordPress } = require('../lib/image-gen');
+const { imagePolicyFor, generateImage, uploadImageToWordPress, isValidLayout } = require('../lib/image-gen');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -55,19 +55,23 @@ const pool = new Pool({
  * attempt's own row (each regen deducts again → its own row → the admin's
  * cost-by-event split can see image_regen adoption and spend).
  */
-async function deductOneCredit(client, licenseKey, domain, postTitle) {
+async function deductOneCredit(client, licenseKey, domain, postTitle, costEvent) {
     const ded = await creditLedger.deductSpanning(client, licenseKey, 1);
     if (!ded.success) {
         return { success: false, error: ded.error || 'Insufficient credits' };
     }
+    // content_type mirrors cost_event so the admin dashboard's by-type and
+    // by-event splits agree. AICOBR_INBODY_IMAGES_2026_08 adds 'image_body' —
+    // separating in-body adoption and spend from featured-image regeneration
+    // from day one, exactly as image_regen was separated from generate.
     const ins = await client.query(`
         INSERT INTO usage_logs (license_key_id, domain, post_title, credits_used, content_type, created_at)
         VALUES (
             (SELECT id FROM license_keys WHERE license_key = $1),
-            $2, $3, 1, 'image_regen', NOW()
+            $2, $3, 1, $4, NOW()
         )
         RETURNING id
-    `, [licenseKey, domain || 'unknown', postTitle || 'Untitled']);
+    `, [licenseKey, domain || 'unknown', postTitle || 'Untitled', costEvent || 'image_regen']);
 
     return { success: true, allocations: ded.allocations, usage_log_id: ins.rows[0]?.id ?? null };
 }
@@ -77,7 +81,7 @@ async function deductOneCredit(client, licenseKey, domain, postTitle) {
  * plugin's server-to-server /append-image endpoint. Returns true on success.
  * Never throws — a failed append is handled by the caller (refund + cost row).
  */
-async function appendImageToWordPress(domain, { entry_id, attachment_id, set_active }, generateSecret) {
+async function appendImageToWordPress(domain, { entry_id, attachment_id, set_active, role, layout, placement, alt_text, caption, suggestion_id }, generateSecret) {
     try {
         const res = await wpFetch(domain, '/append-image', {
             method: 'POST',
@@ -88,7 +92,16 @@ async function appendImageToWordPress(domain, { entry_id, attachment_id, set_act
             body: JSON.stringify({
                 entry_id,
                 attachment_id,
-                set_active: set_active !== false, // default true
+                // An in-body image must NOT become the featured image, so the
+                // plugin's append_image is told the role explicitly rather than
+                // inferring it from set_active.
+                set_active: role === 'body' ? false : (set_active !== false),
+                role:          role || 'featured',
+                layout:        layout || null,
+                placement:     placement || null,
+                alt_text:      alt_text || '',
+                caption:       caption || '',
+                suggestion_id: suggestion_id || '',
             }),
         });
         if (!res.ok) {
@@ -130,6 +143,17 @@ router.post('/', async (req, res) => {
         serp_gl,
         post_id,
         set_active,
+        // AICOBR_INBODY_IMAGES_2026_08 — in-body image request. `role: 'body'`
+        // selects the portrait/landscape size via the layout, the in-body prompt
+        // shape, and a cost_event of its own. Absent, this route behaves exactly
+        // as it did: a featured-image regeneration.
+        role,
+        layout,
+        section_heading,
+        style_anchor,
+        caption,
+        alt_text,
+        suggestion_id,
     } = req.body || {};
 
     // Basic validation — entry_id + post_id are what the plugin needs to append
@@ -141,7 +165,14 @@ router.post('/', async (req, res) => {
         });
     }
 
-    console.log(`[regenerate-image] START — entry ${entry_id} | domain: ${domain} | post_id: ${post_id ?? 'n/a'}`);
+    // AICOBR_INBODY_IMAGES_2026_08 — normalise once, up front, so the policy,
+    // the prompt, the cost row and the append call can never disagree about what
+    // kind of image this is.
+    const imageRole  = role === 'body' ? 'body' : 'featured';
+    const reqLayout  = imageRole === 'body' && isValidLayout(layout) ? layout : undefined;
+    const costEvent  = imageRole === 'body' ? 'image_body' : 'image_regen';
+
+    console.log(`[regenerate-image] START — entry ${entry_id} | role: ${imageRole}${reqLayout ? '/' + reqLayout : ''} | domain: ${domain} | post_id: ${post_id ?? 'n/a'}`);
 
     // ── Step 1: validate licence + resolve tier (mirrors generate.js) ───────
     let licenseTier = 'free';
@@ -183,7 +214,15 @@ router.post('/', async (req, res) => {
     // A no-image tier ({ model: null }) can't regenerate an image — say so
     // cleanly with a code the plugin proxy forwards to the UI. (No tier is
     // configured this way today, but the guard is correct and cheap.)
-    const imagePolicy = imagePolicyFor(licenseTier);
+    // Layout selects the SIZE (an inline figure that text wraps around needs
+    // portrait, not the featured 3:2). A free licence is resolved back to a band
+    // by the shared module, because gpt-image-1-mini has no priced portrait row —
+    // policy.layout is the layout that ACTUALLY applies and is what gets stored,
+    // so the CSS class always matches the file that was generated.
+    const imagePolicy = imagePolicyFor(licenseTier, reqLayout);
+    if (imagePolicy.downgraded) {
+        console.log(`[regenerate-image] layout ${reqLayout} downgraded to ${imagePolicy.layout} on tier ${licenseTier}`);
+    }
     if (!imagePolicy.model) {
         return res.status(400).json({
             success: false,
@@ -198,7 +237,7 @@ router.post('/', async (req, res) => {
     let usageLogId  = null;
     try {
         await client.query('BEGIN');
-        const deduction = await deductOneCredit(client, license_key, domain, title);
+        const deduction = await deductOneCredit(client, license_key, domain, title, costEvent);
         if (!deduction.success) {
             await client.query('ROLLBACK');
             return res.status(402).json({ success: false, error: deduction.error });
@@ -218,7 +257,15 @@ router.post('/', async (req, res) => {
 
     // Respond immediately so the plugin proxy (and the browser behind it) doesn't
     // block on image generation — same async-after-response pattern as generate.
-    res.json({ success: true, message: 'Image generation started', credits_deducted: 1 });
+    res.json({
+        success: true,
+        message: 'Image generation started',
+        credits_deducted: 1,
+        role: imageRole,
+        // The layout that actually applies after any tier downgrade.
+        layout: imageRole === 'body' ? imagePolicy.layout : null,
+        layout_downgraded: !!imagePolicy.downgraded,
+    });
 
     // ── Step 4: async image pipeline ────────────────────────────────────────
     let imageBase64 = null;
@@ -230,6 +277,14 @@ router.post('/', async (req, res) => {
             image_style,
             serp_gl,
             imagePolicy,
+            {
+                role:           imageRole,
+                sectionHeading: section_heading,
+                // The featured image's own prompt, so a set of in-body images
+                // reads as one commission rather than four unrelated stock
+                // photos. Optional — the prompt degrades cleanly without it.
+                styleAnchor:    style_anchor,
+            },
         ).catch(() => null);
 
         if (!imageBase64) {
@@ -249,7 +304,19 @@ router.post('/', async (req, res) => {
 
         const appended = await appendImageToWordPress(
             domain,
-            { entry_id, attachment_id: attachmentId, set_active },
+            {
+                entry_id,
+                attachment_id: attachmentId,
+                set_active,
+                role:      imageRole,
+                layout:    imageRole === 'body' ? imagePolicy.layout : null,
+                placement: imageRole === 'body'
+                    ? { section_heading: section_heading || '', position: req.body?.position || 'end-of-section' }
+                    : null,
+                alt_text:  alt_text || '',
+                caption:   caption  || '',
+                suggestion_id,
+            },
             process.env.GENERATE_SECRET || '',
         );
         if (!appended) {
@@ -269,7 +336,7 @@ router.post('/', async (req, res) => {
             stop_reason: null,
             image:       { model: imagePolicy.model, size: imagePolicy.size, quality: imagePolicy.quality },
             serpCalls:   0,
-            costEvent:   'image_regen',
+            costEvent:   costEvent,
             succeeded:   true,
             generationSeconds: Math.round((Date.now() - startTime) / 1000),
         });
@@ -300,7 +367,7 @@ router.post('/', async (req, res) => {
             stop_reason: null,
             image:       imageBase64 ? { model: imagePolicy.model, size: imagePolicy.size, quality: imagePolicy.quality } : null,
             serpCalls:   0,
-            costEvent:   'image_regen',
+            costEvent:   costEvent,
             succeeded:   false,
             generationSeconds: Math.round((Date.now() - startTime) / 1000),
         });
