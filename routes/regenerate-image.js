@@ -311,7 +311,11 @@ router.post('/', async (req, res) => {
                 role:      imageRole,
                 layout:    imageRole === 'body' ? imagePolicy.layout : null,
                 placement: imageRole === 'body'
-                    ? { section_heading: section_heading || '', position: req.body?.position || 'end-of-section' }
+                    // AICOBR_INBODY_POSITION_DEFAULT_2026_08 — 'end-of-section'
+                    // was retired in 2.9.0 because a figure with no prose after
+                    // it inside its section has nothing to wrap against; default
+                    // to the surviving position instead of the dead one.
+                    ? { section_heading: section_heading || '', position: req.body?.position || 'after-heading' }
                     : null,
                 alt_text:  alt_text || '',
                 caption:   caption  || '',
