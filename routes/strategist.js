@@ -405,6 +405,7 @@ OUTPUT
       "title": "compelling, specific post title (<= 65 chars, no clickbait)",
       "focus_keyphrase": "the single primary keyword for this post",
       "secondary_keywords": ["2-4 supporting terms"],
+      "anchor_variants": ["2-4 natural rephrasings of THIS post's topic, each 2+ words, e.g. swap my/your or sell/selling; NOT the focus keyphrase; NOT another post's keyword"],
       "content_type": "one of the allowed type ids above",
       "cluster": "the pillar topic this post rolls up to",
       "content_gap": "one angle/insight competitors miss that this post should own",
@@ -419,6 +420,10 @@ OUTPUT
 }
 
 // ─── normalise + validate a returned item against the palette ────────────────
+
+// AICOBR_ANCHOR_VARIANTS_2026_08 — pure logic lives in lib/ for standalone tests.
+const { sanitiseAnchorVariants, scrubSiblingVariants } = require('../lib/anchor-variants');
+
 function sanitiseItem(raw, palette, slotDate, pillar = null) {
   const allowedTypes = new Set(palette.map(p => p.type));
   const fallbackInfo = palette.find(p => p.intent === 'informational')?.type || palette[0]?.type || 'blog_post';
@@ -435,6 +440,7 @@ function sanitiseItem(raw, palette, slotDate, pillar = null) {
   const contentGap = String(raw?.content_gap || '').trim();
   const rationale  = String(raw?.rationale || '').trim();
   const intent     = INTENT[type] || 'informational';
+  const anchorVariants = sanitiseAnchorVariants(raw?.anchor_variants, focus);
 
   // AICOBR_CLUSTER_PILLAR_2026_08
   // When a pillar page was chosen, the cluster name is OURS, not the model's.
@@ -471,6 +477,7 @@ function sanitiseItem(raw, palette, slotDate, pillar = null) {
     focus_keyphrase: focus,
     primary_keyword: focus,      // convenience: maps to the diary entry field
     seo_focus_keyword: focus,    // convenience: feeds the SEO pipeline on publish
+    anchor_variants: anchorVariants,   // AICOBR_ANCHOR_VARIANTS_2026_08 — inbound-link phrasings
     content_type: type,
     intent,
     cluster,
@@ -506,6 +513,8 @@ function dedupePlan(items, exclude) {
   }
   return out;
 }
+
+// AICOBR_ANCHOR_VARIANTS_2026_08 — scrubSiblingVariants lives in lib/anchor-variants.js.
 
 // ─── credit gate + deduct (mirrors generate.js: deduct-first, refund-on-fail) ─
 async function gateAndDeduct(client, licenseKey, cost) {
@@ -800,6 +809,7 @@ router.post('/plan', async (req, res) => {
       .slice(0, slots.length)
       .map((raw, i) => sanitiseItem(raw, palette, slots[i].date, pillar));
     items = dedupePlan(items, exclude);
+    items = scrubSiblingVariants(items);   // AICOBR_ANCHOR_VARIANTS_2026_08
 
     const infoCount = items.filter(i => i.intent === 'informational').length;
 
@@ -838,6 +848,10 @@ router.post('/plan', async (req, res) => {
 });
 
 module.exports = router;
+// AICOBR_ANCHOR_VARIANTS_2026_08 — re-export the pure helpers (from lib/) for
+// unit tests. Express only ever calls the router; extra properties are inert.
+module.exports.sanitiseAnchorVariants = sanitiseAnchorVariants;
+module.exports.scrubSiblingVariants   = scrubSiblingVariants;
 
 // Mount in server.js alongside the others:
 //   app.use('/api/strategist', require('./routes/strategist'));
