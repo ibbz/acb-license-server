@@ -405,7 +405,7 @@ OUTPUT
       "title": "compelling, specific post title (<= 65 chars, no clickbait)",
       "focus_keyphrase": "the single primary keyword for this post",
       "secondary_keywords": ["2-4 supporting terms"],
-      "anchor_variants": ["2-4 natural rephrasings of THIS post's topic, each 2+ words, e.g. swap my/your or sell/selling; NOT the focus keyphrase; NOT another post's keyword"],
+      "anchor_variants": ["2-4 natural rephrasings of THIS post's topic, each 2+ words, e.g. swap my/your or sell/selling; NOT the focus keyphrase; NOT another post's keyword; NOT a truncation or prefix of a longer model/product name (e.g. do not use 'Ford Transit' when 'Ford Transit Custom' is a distinct product)"],
       "content_type": "one of the allowed type ids above",
       "cluster": "the pillar topic this post rolls up to",
       "content_gap": "one angle/insight competitors miss that this post should own",
