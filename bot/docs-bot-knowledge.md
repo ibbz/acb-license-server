@@ -1,11 +1,14 @@
 # AI Content Bridge — support assistant knowledge base
 
-Generated 2026-06-19 from the live documentation. This is the complete product
+Generated 2026-08-15 from the live documentation. This is the complete product
 documentation. Answer from it, and link people to the URL of the relevant page.
 
 ## Page index
 
 - Core concepts — https://docs.aicontentbridge.com/core-concepts
+- Images — https://docs.aicontentbridge.com/images
+- Content Strategist & topic clusters — https://docs.aicontentbridge.com/content-strategist
+- Inbound links — https://docs.aicontentbridge.com/inbound-links
 - Troubleshooting & FAQ — https://docs.aicontentbridge.com/troubleshooting
 - Getting started — https://docs.aicontentbridge.com/getting-started
 - Account & billing — https://docs.aicontentbridge.com/account-billing
@@ -48,7 +51,7 @@ documentation. Answer from it, and link people to the URL of the relevant page.
 ========================================================================
 PAGE: Core concepts
 URL: https://docs.aicontentbridge.com/core-concepts
-META: slug=core-concepts | section=Core concepts | updated=2026-06-19
+META: slug=core-concepts | section=Core concepts | updated=2026-07-17
 ========================================================================
 
 # Core concepts
@@ -68,17 +71,29 @@ Credits are charged by **content type**, not by word count. Each type has a fixe
 
 The most a single generation can cost is 4 credits — a 3-credit type with an image added. The live cost is always shown before you generate, so there are no surprises.
 
+Images added **inside** an article afterwards are charged separately, at 1 credit each and only when you generate one. Being suggested images costs nothing at all. See Images.
+
 If a generation fails after the credits have been deducted, they're **refunded automatically** — you're only charged for content you actually receive.
 
 Each plan includes a monthly credit allowance that resets every month. One-time credit **bundles** can be bought on top of any plan and don't expire. If you're on annual billing, your allowance is delivered as a monthly drip rather than a year's worth up front. See the pricing page for current allowances and prices.
 
+## Images
+
+Every generation can include a featured image for +1 credit. Once a post exists you can also add images inside the article — AI Content Bridge reads what you've written and suggests pictures that suit each section, free of charge, and you spend a credit only on the ones you choose to create. See Images.
+
+## Planning ahead
+
+Everything above describes generating one piece at a time. The **Content Strategist** plans many at once — a dated content calendar, or a topic cluster built around a page you already have, with the internal links between them written for you. See Content Strategist & topic clusters.
+
 ## Tiers and access
 
-There are four tiers, and your tier controls which content types and features you can use. Higher tiers include everything in the tiers below them.
+There are four tiers. Your tier controls which **content types** you can generate, your monthly **credit allowance**, and a few service-level features (LMS publishing, multi-site use, priority support). Higher tiers include everything in the tiers below them.
 
-- **Free** — the Blog Post type, an AI featured image, SEO meta, on a single site. The entry point.
+The plugin's own tools — Brand Voice, Writing Style Profiles, ACF field targeting, YouTube embeds and every ecosystem integration — are part of the plugin and work on **every plan, including Free**. They aren't paywalled; tiers gate the generation service, not the plugin.
+
+- **Free** — the Blog Post type, an AI featured image and SEO meta, on a single site. The entry point.
 - **Starter** — adds Tutorial, FAQ Page, WooCommerce Product, Service Page and About Us, plus the Content Diary.
-- **Pro** — adds the rest of the marketing and operations types (Landing Page, Press Release, Job Listing, Review / Comparison, Email Newsletter, Video Script, Social Media Post, Policy & Procedure, Onboarding Document, Event Description), plus Writing Style Profiles, ACF field targeting and the email and events integrations.
+- **Pro** — adds the rest of the marketing and operations types: Landing Page, Press Release, Job Listing, Review / Comparison, Email Newsletter, Video Script, Social Media Post, Policy & Procedure, Onboarding Document and Event Description.
 - **Agency** — adds the full Learning & Development suite (Course Overview, Training Module, Case Study, Explainer Guide, Quiz & Assessment, Workshop Guide and Standard Operating Procedure), LMS publishing to LearnPress and LifterLMS, multi-site use and priority support.
 
 For current prices and monthly credit allowances, see the pricing page.
@@ -119,12 +134,397 @@ Both behaviours fail soft: if the search API key isn't configured or a lookup fa
 
 A Brand Voice editor captures your tone, must-use keywords, banned phrases, audience and style notes, and injects them into every generation so output stays on-brand without re-prompting each time.
 
-Writing Style Profiles go a step further: paste a writing sample and the AI extracts the voice, tone, sentence structure and signature moves, or pick a famous-writer template. Agencies can keep a separate profile per client and switch between them in one click — this is the feature most often cited as the reason to subscribe.
+Writing Style Profiles go a step further: paste a writing sample and the AI extracts the voice, tone, sentence structure and signature moves, or pick a famous-writer template. Agencies can keep a separate profile per client and switch between them in one click. Writing Style Profiles are available on every plan — they make the per-client workflow shine, but they aren't behind the paywall.
+
+
+========================================================================
+PAGE: Images
+URL: https://docs.aicontentbridge.com/images
+META: slug=images | section=Core concepts | updated=2026-08-10
+========================================================================
+
+# Images
+
+AI Content Bridge generates two kinds of image: the **featured image** that heads a post, and **in-body images** that sit inside the article and break up the text.
+
+Both cost 1 credit each. Nothing is ever generated without you asking for it, and you always see the cost before you commit.
+
+## The featured image
+
+Tick **Generate AI Featured Image** when you create a brief and the post comes back with a custom image, generated from the article's subject and your chosen style. It's an optional add-on: +1 credit on any content type that offers it.
+
+Whether that image appears *above* your article is normally a decision your theme makes, and plenty of themes never show it at all. So AI Content Bridge also places it in the content for you, using a shortcode:
+
+```
+[content_featured_image]
+```
+
+You'll find this on the first line of every generated post that has an image. It renders your featured image at 16:9 across the top of the article.
+
+**If your theme already displays the featured image**, you'll see it twice. Two ways to fix that:
+
+- Delete the `[content_featured_image]` line from that post, or
+- Turn it off for every future post: **Settings → Auto-insert featured image at the top of posts**.
+
+You can also change the shape:
+
+```
+[content_featured_image ratio="3:2"]
+[content_featured_image ratio="4:3"]
+[content_featured_image ratio="1:1"]
+```
+
+::: tip
+The shortcode reads whichever image is currently set as featured, so if you regenerate the image later the one at the top of your post updates by itself. There's nothing to re-do.
+:::
+
+## In-body images
+
+An article with one image at the top and then two thousand words of unbroken text reads as a wall. In-body images break that up — and because AI Content Bridge wrote the article, it can suggest pictures that actually match what each section says.
+
+The flow is always the same: **suggestions are free, generating is 1 credit.**
+
+### 1. Get suggestions
+
+There are two ways, and they produce the same thing.
+
+**When you create the brief.** Tick **Suggest up to 3 in-body images**. The descriptions come back with the finished article at no extra cost — they're written as part of the same generation.
+
+**For a post you already have.** Open any generated post's image window and press **Suggest images for this post**. This reads the finished article and suggests images for it, which means it works on everything you've ever generated, not just new content.
+
+Either way you get a short list, each one describing a picture in plain language — "a wide shot of a beginner wrapping their hands" — along with the section it belongs to.
+
+### 2. Choose one
+
+Click a suggestion. Its description loads into the prompt box, where you can edit it before spending anything. Press **Generate this image** to create it. That's the 1 credit.
+
+You can also ignore the suggestions entirely and type your own description.
+
+### 3. Put it in the post
+
+The new image appears in the image window marked **In-body**, with the section it was made for. Press **Insert into post** and it's placed directly under that section's heading, with your text wrapping around it.
+
+Images alternate left and right down the article, so a post with several doesn't look like a template.
+
+::: tip
+In-body images never replace your featured image. They're additions — your lead image stays exactly as it is.
+:::
+
+## When AI Content Bridge won't edit your post
+
+There are two cases where the **Insert into post** button won't write into your content, and both give you a shortcode to place yourself instead:
+
+**The post is built with a page builder.** Elementor, Beaver Builder, Divi and similar store your layout separately from the post content. Editing the content would either be ignored or knock the two out of step, so AI Content Bridge doesn't try.
+
+**The section has been renamed or removed.** The image was made for a specific heading. If that heading has changed, there's no way to know where the image was meant to go — and guessing would put it somewhere wrong. AI Content Bridge stops and asks you to place it.
+
+In both cases you'll be given something like this to paste wherever you want the image:
+
+```
+[content_image id="184" layout="inline-right" caption="Hand wraps go on before gloves"]
+```
+
+`layout` accepts `band` (full width), `inline-left` or `inline-right`.
+
+If you've edited a post since AI Content Bridge wrote it but it's not page-builder-managed, the image is still inserted — you'll just get a note asking you to check the placement.
+
+## Image sizes and quality
+
+Images are generated at the shape they'll be displayed at, rather than being cropped to fit afterwards. A full-width image is landscape; an inset one is portrait, so it holds its detail at 40% of the column width.
+
+Paid plans generate at higher quality than the free plan. On the free plan every in-body image is full width — the lighter image model used there doesn't produce the portrait shape the inset layouts need.
+
+## Alt text
+
+Every suggested image comes with alt text written for it, describing what the picture shows for anyone using a screen reader. It's added automatically when the image is inserted; you can edit it afterwards in the WordPress media library like any other image.
+
+## Common questions
+
+**Do suggestions cost credits?** No. Asking for suggestions is free, on both routes. You only pay when you generate an image.
+
+**How many images can I have in one post?** Suggestions are capped at three, scaled to the length of the piece — a short page gets one. There's no limit on generating your own beyond your credit balance.
+
+**Which content types support in-body images?** The ones where AI Content Bridge controls the page layout: articles, tutorials, guides, service and landing pages, and the learning and development documents. Types where another plugin owns the layout — WooCommerce products, vehicle listings, events, job listings, newsletters and quizzes — don't offer them.
+
+**Can I delete an image after inserting it?** Yes. It's ordinary content in your post — edit the post and remove it like anything else.
+
+**Will regenerating the post keep my in-body images?** No. Regenerating replaces the article's content entirely, including any images placed in it. The images stay in your media library, and the suggestions stay in the image window, so you can place them again.
+
+
+========================================================================
+PAGE: Content Strategist & topic clusters
+URL: https://docs.aicontentbridge.com/content-strategist
+META: slug=content-strategist | section=Core concepts | updated=2026-08-15
+========================================================================
+
+# Content Strategist & topic clusters
+
+The Content Strategist plans content for you. You give it your business context and the keywords you care about; it researches your market, works out what's worth writing, and hands back a dated plan of content briefs. You review and edit that plan, and only then does anything land in your Content Diary.
+
+It has two modes. A **content calendar** — a spread of posts across the months ahead. Or a **topic cluster** — supporting content built around one page you already have, with the internal links between them built for you.
+
+Nothing is generated automatically. The Strategist plans; you approve; you generate each piece when you're ready, the normal way.
+
+## Planning a content calendar
+
+Open the **Content Strategist** tab and fill in four things:
+
+- **Your business** — what you do, who you serve, where you are. This is saved, so you only fill it in once.
+- **Target keywords** — the searches your customers actually use. Add as many as you like. Optional if you're building a cluster around an existing page (see below).
+- **Plan parameters** — when to start, how long the plan runs, and how often you publish.
+- **Content types** — which types the plan may draw on, limited by your plan's palette.
+
+Before you commit, the page shows exactly how many posts the plan will contain and what the plan run costs. Running a plan costs credits itself, because it does live search research and a full planning pass — but it's a fraction of the cost of the content it plans.
+
+How far ahead you can plan depends on your tier:
+
+| Plan | Maximum timespan |
+|---|---|
+| Free | 1 month |
+| Starter | 3 months |
+| Pro | 6 months |
+| Agency | 12 months |
+
+A plan is capped at 40 posts regardless of tier, because a longer plan than that is punishing to review.
+
+## Planning a topic cluster
+
+This is the mode that builds internal links.
+
+Search engines don't rank pages in isolation — they read the structure around them. A page with a group of related posts pointing at it looks like the centre of a topic rather than an orphan. That structure is what a topic cluster is: one **pillar** page, and a set of **supporting posts** that link up to it.
+
+The important detail is that **the pillar is a page you already have.** Usually a service page, a category page or a guide — something that already earns you business and that you'd like to rank better.
+
+### How to do it
+
+1. In the Content Strategist, under **Build a supporting cluster**, choose **Choose an existing page**.
+2. Search for the page and select it. Its title and URL appear as confirmation.
+3. Fill in the rest of the form as normal and run the plan.
+
+The Strategist reads the page you picked — its title and its actual copy — and plans posts that support it: the questions a visitor to that page would still have afterwards. It deliberately avoids repeating what the page already says.
+
+**You don't need to enter keywords for this.** Choosing the page tells the Strategist more than a few typed keywords would, because it can see what the page is actually about. Add keywords only if you want to steer the cluster toward particular angles — think of them as a nudge, not a requirement.
+
+Your business location is still needed, as it sets which country's search results are used.
+
+Every post in the plan shows which pillar it belongs to, and the review step is headed with the page the whole cluster supports. Edit, remove or re-date anything before approving, exactly as with a normal plan.
+
+Leaving the pillar field empty gives you an ordinary content calendar. It's entirely optional.
+
+### The links are written for you
+
+When you generate a post from a cluster brief, the link to your pillar page is **written into the article itself** — in a real sentence, with anchor text that fits what's being said, somewhere in the body where a reader would want it. It isn't a "related articles" list bolted onto the end.
+
+You don't have to do anything to make this happen, and it costs no extra credits.
+
+That covers links going up to your pillar. Once a supporting post is published, you can also link **into** it from posts you wrote long before, which is where the older, more established pages on your site start passing authority to the new one. See Inbound links.
+
+::: tip
+Generate your pillar page first if it doesn't exist yet. Create it through the normal generation flow, publish it, then point the Strategist at it. Any published page can be a pillar — including a post AI Content Bridge wrote for you.
+:::
+
+## Showing the cluster on your pillar page
+
+Supporting posts link *up* to your pillar automatically. To have the pillar link *back down* to them, add this shortcode to the page:
+
+```
+[content_cluster]
+```
+
+That's it — no IDs, no settings. It knows which page it's on and lists that page's supporting posts. As each new post is published it appears in the list; if you unpublish one, it disappears.
+
+You can customise the heading, or limit how many appear:
+
+```
+[content_cluster heading="Read more on this topic"]
+[content_cluster heading="" limit="6"]
+```
+
+An empty `heading` renders the list with no heading at all.
+
+::: tip
+If you used `[aicobr_cluster]` in an earlier version, it still works — both names do the same thing, so there's nothing to change on pages you've already set up.
+:::
+
+### Nothing showing up?
+
+**Only published posts appear.** AI Content Bridge generates everything as a draft so you can review it before it goes live, and a draft has no public URL yet — linking to one would send your visitors to a missing page. Publish the post and it appears immediately.
+
+If you're logged in with editing permissions and the cluster has posts that aren't live yet, the block tells you how many are waiting. Your visitors never see that message.
+
+## Adding to a cluster later
+
+Run the Strategist again and choose the same page. The new posts join the existing cluster rather than starting a second one, and the Strategist is told what that cluster already covers so it fills the gaps instead of repeating them.
+
+It rejects ideas that answer the same question as an existing post, even when worded differently — "how much does a boiler service cost" and "boiler servicing prices" are one search, not two, and two pages chasing it compete with each other. So a second run on a well-covered pillar may come back with fewer posts than slots. That's the right outcome, not a fault.
+
+## Finding your clusters later
+
+In the **Content Diary**, a cluster filter appears next to the sort dropdown once you have at least one cluster. Each option shows how many of that cluster's posts are live:
+
+> Commercial Boiler Servicing (3/8 live)
+
+That count is the useful one — it tells you how much of the cluster is actually working, since only published posts appear in the shortcode block and carry link value.
+
+Select a cluster and a bar appears with the pillar page's name, its progress and a link to view the page.
+
+## Common questions
+
+**Does this cost extra?** No. Cluster planning is included on every paid plan with no monthly limit, and the internal links cost no credits at all. A plan run costs the same whether or not you choose a pillar.
+
+**Will it edit my existing page?** No. AI Content Bridge never edits a page it didn't create. That's exactly why the pillar's list of supporting posts is a shortcode you place yourself.
+
+**Can I build a third level?** Yes. Any published post can be chosen as a pillar, including one from an existing cluster. Do it when a supporting post is genuinely broad enough to be a hub in its own right — not by default, or you'll end up with thin pages competing with each other.
+
+**What if I change the pillar page's URL?** Links already written into published posts keep working through WordPress's own redirect. Posts generated after the change use the new URL automatically.
+
+**Can I delete a brief and its post together?** Yes. When you delete a brief that produced content, you're asked separately whether to move that post to the WordPress trash. It defaults to no, it's always the trash rather than permanent deletion, and it only ever applies to posts AI Content Bridge created.
+
+
+========================================================================
+PAGE: Inbound links
+URL: https://docs.aicontentbridge.com/inbound-links
+META: slug=inbound-links | section=Core concepts | updated=2026-08-15
+========================================================================
+
+# Inbound links
+
+When you publish a new post, the older posts on your site do not know it exists. Inbound links fixes that. It looks through your back catalogue for posts that could sensibly link to the one you have just published, shows you each one in the sentence the link would land in, and writes in the ones you approve.
+
+It costs no credits and uses no AI.
+
+## What this is, and what it is not
+
+The Content Strategist already links **down**: when you generate a post from a cluster brief, the link up to your pillar page is written into the article as it is created.
+
+Inbound links works in the opposite direction. It links **in**, from posts that already existed to the post you just published. Those older posts are usually your most established pages, so a link from one of them is worth more than a link from something published yesterday.
+
+It is not an automatic linker. Nothing is written to any post until you approve that specific suggestion. There is no "link everything" button, and there is no background process that changes your content while you are not looking.
+
+::: tip Three different scans
+The word "scan" turns up in three unrelated places in AI Content Bridge, and they are worth keeping apart:
+
+- The **Content Strategist** researches your market before planning a calendar or cluster. That costs credits.
+- The **outline review** reads live search results before writing a keyword-led page. That is part of generation and costs credits.
+- The **inbound-link scan** on this page reads your own database, matching phrases you already declared. It costs nothing and never leaves your site.
+:::
+
+## Running a scan
+
+Inbound links only works on a post that is already **published**, because a link to a draft or a scheduled post would give your readers a 404.
+
+From the Content Diary, open a published entry and choose **Inbound links**. In grid view, the same thing is on the link icon in the card's action row. The review screen opens and the scan runs straight away.
+
+Scans are cached for fifteen minutes. **Re-scan** forces a fresh one.
+
+## What it searches for
+
+Matching is exact phrase, against words you declared yourself when you planned the post. Nothing is inferred. In priority order:
+
+1. **Your primary keyword.** What you said this post is about.
+2. **Your SEO focus keyphrase.**
+3. **Anchor variants.** Alternative phrasings of the same topic, such as "sell your van" alongside "sell my van". The Content Strategist writes these when it plans a cluster, and you can edit them on any brief. They catch the near-misses that exact matching would otherwise drop, like "my" against "your", or "sell" against "selling".
+4. **Your cluster pillar phrase.** A link that uses this points at your **pillar page**, not at the post you are reviewing.
+
+Everything aimed at the post itself is tried before the pillar, so a post that could host either gets the more specific link.
+
+That pillar fallback matters more than it sounds. A spoke's own keyword is often long-tail, something like "sell van with outstanding finance UK", which nothing in a hand-written back catalogue ever says word for word. The pillar phrase is short and natural, so it does occur. On a live site we tested, the spoke keyword found nothing at all and the pillar phrase found plenty.
+
+Because a pillar link goes somewhere else, those suggestions are shown in their own section, headed **Different page**, with the destination named. A link going somewhere other than the post in front of you is never a surprise.
+
+::: warning Matching is literal
+Your other posts have to already write those exact words in that exact order. Phrases ending in "review", "guide", "near me" or "UK" almost never match, because that is search phrasing rather than writing phrasing. If a scan finds nothing, this is usually why.
+:::
+
+## Reading the header
+
+Every scan is summarised in one line:
+
+```
+74 candidates · 17 opportunities · 34 would split a longer name · 22 no phrase match · 1 no safe spot
+```
+
+The numbers reconcile exactly, and each one means something specific.
+
+| Counter | Meaning |
+|---|---|
+| **candidates** | Posts worth checking. This is a wide first pass on a single word from your phrases, so it is not the number of posts containing the phrase. |
+| **opportunities** | Links you can approve. If there are more than fit on screen, it says "showing top 20". |
+| **no phrase match** | The phrase is not in those posts at all. |
+| **would split a longer name** | The phrase is there, in ordinary prose, and was refused only because linking it would break up a longer product name. See below. |
+| **no safe spot** | The phrase is there, but only in a heading, an existing link, a caption, a quote or code. |
+| **already linked** | That post already links here. Nothing to do. |
+| **page-builder** | Built with Elementor, Divi, Beaver Builder or similar, so the content is not stored where ACB can safely edit it. |
+| **not editable** | Your user account cannot edit that post. |
+
+## Protecting product names
+
+This is the part that is easy to get wrong and expensive to notice.
+
+If you sell a **Ford Transit** and also a **Ford Transit Custom**, then the words "Ford Transit" appear inside the longer name. A linker that just looks for the phrase will happily wrap the first two words of "Ford Transit Custom" and send anyone who clicks to the wrong vehicle. The name is split, the sentence now reads oddly, and nobody notices for months.
+
+AI Content Bridge refuses those spots. It knows "Ford Transit Custom" is a separate thing because **you told it**, either as a keyword on another brief or as the title of a post you published. No model is guessing on your behalf, so the same content always produces the same decision, and you can always explain why a link was refused.
+
+It stays out of the way when there is nothing to protect. On the same live site, a target with no longer names extending its phrase was refused nothing at all.
+
+Those refusals are counted as **would split a longer name**. The phrase really is in those posts, in real prose, in a spot ACB would otherwise link. Nothing is wrong with your content. If those mentions genuinely are about the post you are reviewing, use a phrase that does not begin another product's name.
+
+The guard learns names that **start** a post title, or start a clearly separated part of one, like "Top 10 Vans of 2026 - Ford Transit Custom (No.1)". It deliberately does not go hunting for names in the middle of ordinary prose titles, because doing so would start suppressing perfectly good links without telling you. If you sell something the guard cannot see this way, a developer can declare it directly. See Developer docs, Filters.
+
+## Reviewing and approving
+
+Each suggestion shows the sentence the link would go in, with the anchor text highlighted, the source post's title with a link to edit it in a new tab, the post's date, and a badge saying which of your phrases matched.
+
+Nothing is selected by default. You approve deliberately or not at all.
+
+Where the same phrase appears in many posts, near-identical suggestions are **grouped** into one row with a count. Twenty posts saying the same thing is one editorial decision made twenty times, so you judge the pattern once. Open the group to check individual posts and skip any exception.
+
+Approving several at once processes them one at a time, with a live count, so a failure on post 12 is reported against post 12 instead of disappearing into a batch.
+
+## Undo
+
+Every link ACB inserts can be removed again from the same screen. Undo restores the original text exactly, leaving the wording as it was before.
+
+Links you inserted stay on screen even after a re-scan, so undo does not go out of reach. A fresh scan will correctly stop suggesting those posts, since they now already link here.
+
+Undo works on the exact link ACB wrote. If you have since edited that part of the post yourself, ACB will tell you it can no longer find the link and ask you to remove it by hand rather than guessing at your rewritten text.
+
+## Nothing is written to a post that has changed
+
+Between scanning a post and approving a suggestion, the post might have been edited, perhaps by a colleague. ACB does not trust the position it found earlier. At the moment it writes, it looks again for the sentence you approved, and only writes the link where that sentence still is.
+
+If it has moved, changed or gone, **nothing is written** and you are told to re-scan. That is deliberate. A link in roughly the right place is worse than no link, because you will not spot it.
+
+## When a scan finds nothing
+
+The review screen always tells you why, and lists the exact phrases it searched for. The fix depends on the reason.
+
+| What it says | What to do |
+|---|---|
+| Those posts matched on a single word, but none contains the phrase itself | Your anchor phrase is search phrasing, not writing phrasing. Add an anchor variant that matches how you actually write. |
+| The phrase appears, but runs into a longer product name | Working as intended. Use a phrase that does not begin another product's name. |
+| The phrase appears, but only in a heading, link, caption, quote or code | Working as intended. Linking headings reads as spam and nesting links is invalid HTML. |
+| Every post that mentions this topic already links here | Nothing left to do. |
+| This brief has no primary keyword, focus keyphrase or cluster pillar | Add a keyword to the brief and scan again. |
+| Inbound links can only point at a published post | Publish the post first. |
+
+The most common of these by far is the first, and the answer is nearly always an anchor variant. Look at what your older posts actually say, and add that phrasing to the brief.
+
+## Which posts get searched
+
+Published posts only, and by default only the **post** type. Pages, products and other custom types are excluded unless a developer opts them in. See Developer docs.
+
+ACB proposes at most one link per source post per scan, so a single old article never picks up several links to the same target at once.
+
+## Related
+
+Content Strategist & topic clusters · Core concepts · Developer docs · Troubleshooting & FAQ
+
 
 ========================================================================
 PAGE: Troubleshooting & FAQ
 URL: https://docs.aicontentbridge.com/troubleshooting
-META: slug=troubleshooting | section=Troubleshooting & FAQ | updated=2026-06-19
+META: slug=troubleshooting | section=Troubleshooting & FAQ | updated=2026-07-17
 ========================================================================
 
 # Troubleshooting & FAQ
@@ -139,9 +539,9 @@ First, the reassuring part: **a failed generation doesn't cost you credits.** Cr
 
 **"Insufficient credits"** — you don't have enough credits for this generation. Remember the cost is the content type's base cost plus 1 if you've added an image. A second, easy-to-miss cause: **credits expire**. Monthly allowances have an expiry, and expired credits no longer count toward a generation even if an old total still seems to show. Fix it by checking your live balance in the portal, buying a one-time bundle (bundles don't expire), waiting for your monthly reset, or lowering the cost — drop the image or pick a lighter type.
 
-**"The [type] content type is not available on your current plan"** — a tier gate. That type is on a higher plan than yours. Upgrade to unlock it, or pick a type your plan includes. The same applies to a couple of features: ACF field targeting is Pro and above, and YouTube embedding is Starter and above — you'll see a matching notice in the plugin.
+**"The [type] content type is not available on your current plan"** — a tier gate. That content type is on a higher plan than yours. Upgrade to unlock it, or pick a type your plan includes. Note this gate applies to content *types* only — the plugin's own tools (Writing Style Profiles, ACF field targeting, YouTube embeds, Brand Voice) work on every plan, including Free.
 
-**"This license is registered to [domain]…"** — a licence locks to the **first domain** it's used on. Using it on a different domain is blocked, and the message names the domain it's tied to. To move it to a new site, contact support to transfer it.
+**"This license is registered to [domain]…"** — you're on the **free plan**, which locks to the first site the licence is used on. Only free licences are domain-locked; Starter, Pro and Agency work across as many sites as you like. Either upgrade, or contact support to transfer the free licence to the new domain.
 
 ## I'm on an annual plan but only see one month's credits
 
@@ -163,6 +563,28 @@ To keep the service healthy there's a cap on how often you can generate from one
 
 If generation succeeds but publishing back to your site fails, the server couldn't write to your site's REST API. The usual causes are the WordPress REST API being disabled, a security or firewall plugin blocking REST requests, permalinks not enabled, or the site being temporarily unreachable. Make sure pretty permalinks are on, the REST API is reachable, and any security plugin allows AI Content Bridge's requests. Credits are refunded when a publish fails.
 
+## The featured image appears twice at the top of the post
+
+Your theme is displaying the featured image *and* AI Content Bridge has placed it in the content. Both are doing their job; you only want one.
+
+Either delete the `[content_featured_image]` line from that post, or switch it off for every future post under **Settings → Auto-insert featured image at the top of posts**. Existing posts keep the line until you remove it.
+
+## "This post is built with a page builder, so ACB will not edit its content"
+
+Elementor, Beaver Builder, Divi and similar keep your layout in their own storage rather than in the post content, so editing the content would either be ignored or push the two out of step. Rather than risk your layout, AI Content Bridge hands you a `[content_image]` shortcode to paste wherever you want the picture. It renders exactly the same thing.
+
+## "That section is no longer in this post"
+
+The image was created for a specific heading, and that heading has since been renamed or removed. There's no safe way to work out where it was meant to go, so AI Content Bridge stops rather than guessing and putting it somewhere wrong. Use the `[content_image]` shortcode it gives you to place it yourself, or ask for fresh suggestions so they match the post's current headings.
+
+## In-body images are all full width
+
+You're on the free plan. The lighter image model used there only produces landscape images, so the inset left and right layouts aren't available and every image is placed full width instead. Paid plans generate the portrait shape those layouts need.
+
+## "Image generation rate limit exceeded"
+
+There's a cap on how many images one licence can generate in a short window. Wait a few minutes and carry on — nothing is wrong with your account, and no credits are lost.
+
 ## The image or video is missing, but the post published
 
 Featured images and YouTube embeds are optional and **fail soft** — if the image model or the video lookup has a hiccup, the article still publishes, just without them. For video, it can also simply mean no strong match was found. Regenerate, or add the image or embed manually. Remember an image is only charged (+1 credit) when you opt in.
@@ -183,10 +605,11 @@ Integrations are detected automatically from the plugins active on your site. If
 
 If you're still stuck, raise a ticket from the **Support** screen of the customer portal. Your plan, registered domain and WordPress version are attached automatically. To get the fastest answer, include the content type you were using, the exact error message, and your WordPress version. Pro and Agency customers receive priority support.
 
+
 ========================================================================
 PAGE: Getting started
 URL: https://docs.aicontentbridge.com/getting-started
-META: slug=getting-started | section=Getting started | updated=2026-06-19
+META: slug=getting-started | section=Getting started | updated=2026-07-17
 ========================================================================
 
 # Getting started
@@ -201,7 +624,7 @@ This page takes you from a fresh install to your first published piece in a few 
 
 ## Install and activate
 
-1. Install the AI Content Bridge plugin on your site (upload the plugin or install it from your account, then activate it like any other plugin).
+1. In your WordPress admin, go to **Plugins → Add New**, search for **AI Content Bridge**, and click **Install Now**, then **Activate**. (You can also upload the plugin zip from your account if you prefer, but installing from the WordPress.org directory is the quickest route and keeps you on automatic updates.)
 2. Open the AI Content Bridge settings in your WordPress admin.
 3. Enter your **licence key** and save. The plugin validates the key with the service and, on first use, locks the licence to your site's domain (see Account & billing → Domain locking).
 
@@ -211,9 +634,11 @@ Once the key is accepted, you're ready to generate.
 
 1. Open AI Content Bridge and start a new piece.
 2. Choose a **content type** — start with Blog Post / Article, which is available on every plan. (See the Content types overview for the full list.)
-3. Fill in the form: a title, your primary keyword, and any fields specific to that type. Decide whether to include a featured image.
+3. Fill in the form: a title, your primary keyword, and any fields specific to that type. Decide whether to include a featured image, and whether you'd like images suggested for inside the article (suggestions are free).
 4. Generate. For keyword-led web types you'll first see an editable outline to review and approve; other types generate straight through. Generation usually takes around 90 seconds to two minutes.
 5. The finished piece appears in your Content Diary with its SEO score. Review it, then publish to your site.
+
+If you asked for image suggestions, open the entry's image window to see them: each one describes a picture for a particular section, and you spend a credit only on the ones you choose to create. See Images.
 
 ## The Content Diary
 
@@ -222,6 +647,7 @@ The Content Diary is your home view: every piece you generate is listed there wi
 ## Where to go next
 
 - New to how credits, plans and the SEO score work? Read Core concepts.
+- Want to illustrate your articles rather than ship a wall of text? See Images.
 - Want to know what each content type does? See the Content types overview.
 - Run other plugins like WooCommerce, an LMS or an SEO plugin? See Integrations.
 - Something not working? See Troubleshooting & FAQ.
@@ -229,6 +655,7 @@ The Content Diary is your home view: every piece you generate is listed there wi
 ## Related
 
 Core concepts · Content types overview · Account & billing · Troubleshooting & FAQ
+
 
 ========================================================================
 PAGE: Account & billing
@@ -262,7 +689,9 @@ For current plan prices and credit allowances, see the pricing page.
 
 ## Domain locking
 
-A licence locks to the **first domain** it's used on. This protects your licence from being used elsewhere. If you try to use it on a different domain, generation is blocked and you'll see a message naming the domain the licence is registered to. To move a licence to a new site — for example after a rebuild or a domain change — contact support to transfer it.
+Domain locking applies to the **free plan only**. A free licence locks to the first site it's used on, which keeps free credits tied to one install. If you try to use it elsewhere, generation is blocked and you'll see a message naming the domain the licence is registered to. To move a free licence to a new site — after a rebuild or a domain change — contact support to transfer it.
+
+**Paid plans are not domain-locked.** Starter, Pro and Agency licences work across as many sites as you like — useful if you run several of your own, or client sites as an agency. Credits come from one shared pool, so usage across all your sites draws on the same monthly allowance.
 
 ## Getting support
 
@@ -271,6 +700,7 @@ Raise a ticket from the Support area of the portal. Your plan, registered domain
 ## Related
 
 Core concepts → Credits · Core concepts → Tiers and access · Troubleshooting & FAQ
+
 
 ========================================================================
 PAGE: Content types overview
@@ -335,10 +765,11 @@ How to read the table:
 
 The same SEO score runs on every type in this table, and credits are refunded automatically if a generation fails. For how credits, tiers and the SEO layer work, see Core concepts.
 
+
 ========================================================================
 PAGE: Blog Post / Article
 URL: https://docs.aicontentbridge.com/content-types/blog-post
-META: slug=blog-post | group=Content Marketing | tier=free | credits=2 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=blog-post | section= | updated=2026-06-19
 ========================================================================
 
 # Blog Post / Article
@@ -414,10 +845,11 @@ Both behaviours apply. The SEO score is calculated and shown on the Content Diar
 
 Tutorial / How-To, FAQ Page, Review / Comparison Article · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Tutorial / How-To
 URL: https://docs.aicontentbridge.com/content-types/tutorial
-META: slug=tutorial | group=Content Marketing | tier=starter | credits=2 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=tutorial | section= | updated=2026-06-19
 ========================================================================
 
 # Tutorial / How-To
@@ -491,10 +923,11 @@ Both apply: the SEO score is calculated on every generation, and because a tutor
 
 Blog Post / Article, Explainer / Concept Guide, Standard Operating Procedure · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: FAQ Page
 URL: https://docs.aicontentbridge.com/content-types/faq-page
-META: slug=faq-page | group=Content Marketing | tier=starter | credits=1 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=faq-page | section= | updated=2026-06-19
 ========================================================================
 
 # FAQ Page
@@ -568,10 +1001,11 @@ Both apply: the SEO score is calculated on every generation, and the editable SE
 
 Blog Post / Article, Tutorial / How-To · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Review / Comparison Article
 URL: https://docs.aicontentbridge.com/content-types/review-comparison
-META: slug=review-comparison | group=Content Marketing | tier=pro | credits=3 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=review-comparison | section= | updated=2026-06-19
 ========================================================================
 
 # Review / Comparison Article
@@ -651,10 +1085,11 @@ Both apply: the SEO score is calculated on every generation, and the editable SE
 
 Blog Post / Article, Service Page, WooCommerce Product · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Email Newsletter
 URL: https://docs.aicontentbridge.com/content-types/email-newsletter
-META: slug=email-newsletter | group=Content Marketing | tier=pro | credits=1 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=email-newsletter | section= | updated=2026-06-19
 ========================================================================
 
 # Email Newsletter
@@ -728,10 +1163,11 @@ The SEO score is calculated and shown on every generation (it grades the meta an
 
 Social Media Post, Blog Post / Article · Integrations → Email · Content types overview
 
+
 ========================================================================
 PAGE: Video Script
 URL: https://docs.aicontentbridge.com/content-types/video-script
-META: slug=video-script | group=Content Marketing | tier=pro | credits=2 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=video-script | section= | updated=2026-06-19
 ========================================================================
 
 # Video Script
@@ -805,10 +1241,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Social Media Post, Blog Post / Article, Tutorial / How-To · Content types overview
 
+
 ========================================================================
 PAGE: Social Media Post
 URL: https://docs.aicontentbridge.com/content-types/social-media
-META: slug=social-media | group=Content Marketing | tier=pro | credits=1 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=social-media | section= | updated=2026-06-19
 ========================================================================
 
 # Social Media Post
@@ -884,10 +1321,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Email Newsletter, Video Script · Content types overview
 
+
 ========================================================================
 PAGE: Event Description
 URL: https://docs.aicontentbridge.com/content-types/event-description
-META: slug=event-description | group=Content Marketing | tier=pro | credits=1 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=event-description | section= | updated=2026-06-19
 ========================================================================
 
 # Event Description
@@ -972,10 +1410,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Service Page, Press Release · Integrations → Events · Content types overview
 
+
 ========================================================================
 PAGE: WooCommerce Product
 URL: https://docs.aicontentbridge.com/content-types/woocommerce-product
-META: slug=woocommerce-product | group=Sales & Commerce | tier=starter | credits=1 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=woocommerce-product | section= | updated=2026-06-19
 ========================================================================
 
 # WooCommerce Product
@@ -1054,10 +1493,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Service Page, Vehicle Listing, Review / Comparison Article · Integrations → WooCommerce · Content types overview
 
+
 ========================================================================
 PAGE: Service Page
 URL: https://docs.aicontentbridge.com/content-types/service-page
-META: slug=service-page | group=Sales & Commerce | tier=starter | credits=2 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=service-page | section= | updated=2026-06-19
 ========================================================================
 
 # Service Page
@@ -1134,10 +1574,11 @@ Both apply: the SEO score is calculated on every generation, and because a servi
 
 WooCommerce Product, Landing Page, About Us / Company Page · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Vehicle Listing
 URL: https://docs.aicontentbridge.com/content-types/vehicle-listing
-META: slug=vehicle-listing | group=Sales & Commerce | tier=pro | credits=1 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=vehicle-listing | section= | updated=2026-06-19
 ========================================================================
 
 # Vehicle Listing
@@ -1219,10 +1660,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 WooCommerce Product, Service Page · Content types overview
 
+
 ========================================================================
 PAGE: Landing Page
 URL: https://docs.aicontentbridge.com/content-types/landing-page
-META: slug=landing-page | group=Sales & Commerce | tier=pro | credits=3 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=landing-page | section= | updated=2026-06-19
 ========================================================================
 
 # Landing Page
@@ -1301,10 +1743,11 @@ Both apply: the SEO score is calculated on every generation, and because a landi
 
 Service Page, WooCommerce Product · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: About Us / Company Page
 URL: https://docs.aicontentbridge.com/content-types/about-us
-META: slug=about-us | group=Business | tier=starter | credits=1 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=about-us | section= | updated=2026-06-19
 ========================================================================
 
 # About Us / Company Page
@@ -1380,10 +1823,11 @@ Both apply: the SEO score is calculated on every generation, and the editable SE
 
 Service Page, Job Listing, Press Release · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Press Release
 URL: https://docs.aicontentbridge.com/content-types/press-release
-META: slug=press-release | group=Business | tier=pro | credits=1 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=press-release | section= | updated=2026-06-19
 ========================================================================
 
 # Press Release
@@ -1461,10 +1905,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 About Us / Company Page, Event Description, Email Newsletter · Content types overview
 
+
 ========================================================================
 PAGE: Job Listing
 URL: https://docs.aicontentbridge.com/content-types/job-listing
-META: slug=job-listing | group=Business | tier=pro | credits=1 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=job-listing | section= | updated=2026-06-19
 ========================================================================
 
 # Job Listing
@@ -1545,10 +1990,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 About Us / Company Page, Onboarding Document · Content types overview
 
+
 ========================================================================
 PAGE: Policy & Procedure
 URL: https://docs.aicontentbridge.com/content-types/policy-procedure
-META: slug=policy-procedure | group=Business | tier=pro | credits=2 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=policy-procedure | section= | updated=2026-06-19
 ========================================================================
 
 # Policy & Procedure
@@ -1627,10 +2073,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Standard Operating Procedure, Onboarding Document · Content types overview
 
+
 ========================================================================
 PAGE: Onboarding Document
 URL: https://docs.aicontentbridge.com/content-types/onboarding-doc
-META: slug=onboarding-doc | group=Business | tier=pro | credits=2 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=onboarding-doc | section= | updated=2026-06-19
 ========================================================================
 
 # Onboarding Document
@@ -1707,10 +2154,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Policy & Procedure, Standard Operating Procedure, Job Listing · Content types overview
 
+
 ========================================================================
 PAGE: Course Overview / Syllabus
 URL: https://docs.aicontentbridge.com/content-types/course-overview
-META: slug=course-overview | group=Learning & Development | tier=agency | credits=3 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=course-overview | section= | updated=2026-06-19
 ========================================================================
 
 # Course Overview / Syllabus
@@ -1793,10 +2241,11 @@ The deterministic SEO score is calculated and shown on the Content Diary entry, 
 
 Training Module, Quiz / Assessment, Workshop Facilitation Guide · Integrations → LMS · Content types overview
 
+
 ========================================================================
 PAGE: Training Module / Lesson
 URL: https://docs.aicontentbridge.com/content-types/training-module
-META: slug=training-module | group=Learning & Development | tier=agency | credits=3 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=training-module | section= | updated=2026-06-19
 ========================================================================
 
 # Training Module / Lesson
@@ -1878,10 +2327,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Course Overview, Quiz / Assessment, Explainer / Concept Guide · Integrations → LMS · Content types overview
 
+
 ========================================================================
 PAGE: Case Study (L&D)
 URL: https://docs.aicontentbridge.com/content-types/case-study
-META: slug=case-study | group=Learning & Development | tier=agency | credits=3 | image_capable=true | serp_outline=false | updated=2026-06-19
+META: slug=case-study | section= | updated=2026-06-19
 ========================================================================
 
 # Case Study (L&D)
@@ -1959,10 +2409,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Training Module, Workshop Facilitation Guide, Explainer / Concept Guide · Content types overview
 
+
 ========================================================================
 PAGE: Explainer / Concept Guide
 URL: https://docs.aicontentbridge.com/content-types/explainer-guide
-META: slug=explainer-guide | group=Learning & Development | tier=agency | credits=2 | image_capable=true | serp_outline=true | updated=2026-06-19
+META: slug=explainer-guide | section= | updated=2026-06-19
 ========================================================================
 
 # Explainer / Concept Guide
@@ -2042,10 +2493,11 @@ Two things apply here. The SEO score is calculated on every generation, as usual
 
 Training Module, Tutorial / How-To, Case Study · Core concepts → SERP grounding · Content types overview
 
+
 ========================================================================
 PAGE: Quiz / Assessment
 URL: https://docs.aicontentbridge.com/content-types/quiz-assessment
-META: slug=quiz-assessment | group=Learning & Development | tier=agency | credits=3 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=quiz-assessment | section= | updated=2026-06-19
 ========================================================================
 
 # Quiz / Assessment
@@ -2125,10 +2577,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Training Module, Course Overview · Integrations → LMS · Content types overview
 
+
 ========================================================================
 PAGE: Workshop Facilitation Guide
 URL: https://docs.aicontentbridge.com/content-types/workshop-guide
-META: slug=workshop-guide | group=Learning & Development | tier=agency | credits=3 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=workshop-guide | section= | updated=2026-06-19
 ========================================================================
 
 # Workshop Facilitation Guide
@@ -2204,10 +2657,11 @@ The SEO score is calculated and shown on every generation. The SERP outline-revi
 
 Training Module, Case Study, Course Overview · Content types overview
 
+
 ========================================================================
 PAGE: Standard Operating Procedure
 URL: https://docs.aicontentbridge.com/content-types/sop
-META: slug=sop | group=Learning & Development | tier=agency | credits=2 | image_capable=false | serp_outline=false | updated=2026-06-19
+META: slug=sop | section= | updated=2026-06-19
 ========================================================================
 
 # Standard Operating Procedure
@@ -2312,13 +2766,14 @@ Two things to know. First, the deterministic SEO score (0–100 plus its fix che
 
 Explainer / Concept Guide, Training Module, Onboarding Document · Integrations → SEO plugins · Content types overview
 
+
 ========================================================================
 PAGE: Integrations overview
 URL: https://docs.aicontentbridge.com/integrations
-META: slug=integrations | section=Integrations | updated=2026-06-19
+META: slug=integrations | section=Integrations | updated=2026-07-17
 ========================================================================
 
-# Integrations
+# Integrations overview
 
 AI Content Bridge works with the plugins you already run. There's nothing to connect or configure: it **detects** the relevant plugin on your site and adapts what it publishes accordingly. If a plugin isn't present, it falls back gracefully to a standard WordPress post — you never get an error just because an integration isn't installed.
 
@@ -2328,12 +2783,13 @@ How detection works, in one sentence: when you generate, the plugin checks which
 |---|---|---|---|
 | [SEO plugins](integrations-seo) | Yoast, Rank Math, SEOPress | Writes the generated SEO title, description, focus keyword and social tags into the plugin's own fields | All plans |
 | [WooCommerce](integrations-woocommerce) | WooCommerce | Publishes the WooCommerce Product type as a real product with price and SKU | Starter+ |
-| [Custom fields (ACF)](integrations-acf) | Advanced Custom Fields | Writes generated content into a specific ACF field rather than the post body | Pro+ |
+| [Custom fields (ACF)](integrations-acf) | Advanced Custom Fields | Writes generated content into a specific ACF field rather than the post body | All plans |
 | [LMS](integrations-lms) | LearnPress, LifterLMS | Publishes Training Modules as lessons and Quizzes as LMS quizzes | Agency |
 | [Email](integrations-email) | MailPoet, Newsletter (TNP) | Drops an Email Newsletter into the tool as a draft campaign | Pro+ |
 | [Events](integrations-events) | The Events Calendar | Publishes an Event Description as a calendar event with dates, venue and cost | Pro+ |
 
 If something you expected to publish to an integration landed as a plain post instead, the usual cause is that the target plugin wasn't active, or your plan doesn't include that integration. See Troubleshooting → An integration didn't fire.
+
 
 ========================================================================
 PAGE: Integrations: SEO plugins
@@ -2341,7 +2797,7 @@ URL: https://docs.aicontentbridge.com/integrations/integrations-seo
 META: slug=integrations-seo | section=Integrations | updated=2026-06-19
 ========================================================================
 
-# SEO plugins
+# Integrations: SEO plugins
 
 Every generation produces SEO metadata — a meta title, a meta description, a focus keyword and Open Graph social tags. When a supported SEO plugin is active, AI Content Bridge writes that metadata straight into the plugin's own fields, so your post arrives fully optimised without you copying anything across. This works on every plan and for every content type.
 
@@ -2365,13 +2821,14 @@ If none of these is installed, the SEO metadata is still generated and saved wit
 
 Core concepts → The SEO score · Core concepts → SERP grounding · Integrations overview
 
+
 ========================================================================
 PAGE: Integrations: WooCommerce
 URL: https://docs.aicontentbridge.com/integrations/integrations-woocommerce
 META: slug=integrations-woocommerce | section=Integrations | updated=2026-06-19
 ========================================================================
 
-# WooCommerce
+# Integrations: WooCommerce
 
 When WooCommerce is active, the WooCommerce Product content type publishes as a real product rather than a plain post — so the description lands where your shop expects it, with the commerce fields populated.
 
@@ -2397,15 +2854,16 @@ If WooCommerce isn't active, the WooCommerce Product type still works — it sim
 
 Content types → WooCommerce Product · Integrations overview · Troubleshooting → An integration didn't fire
 
+
 ========================================================================
 PAGE: Integrations: Custom fields (ACF)
 URL: https://docs.aicontentbridge.com/integrations/integrations-acf
-META: slug=integrations-acf | section=Integrations | updated=2026-06-19
+META: slug=integrations-acf | section=Integrations | updated=2026-07-17
 ========================================================================
 
-# Custom fields (ACF)
+# Integrations: Custom fields (ACF)
 
-Advanced Custom Fields support lets you send generated content into a specific custom field rather than the post body. It's for theme-driven and page-builder setups where your layout reads content from named fields instead of the main editor. ACF field targeting is available on **Pro and above**.
+Advanced Custom Fields support lets you send generated content into a specific custom field rather than the post body. It's for theme-driven and page-builder setups where your layout reads content from named fields instead of the main editor. ACF field targeting is a built-in plugin feature and is available on **every plan** — including Free. Which content *types* you can generate still depends on your plan (see Tiers and access), but targeting a field is not itself a paid unlock.
 
 ## What it does
 
@@ -2423,13 +2881,14 @@ If ACF isn't active, or you don't choose a field, content publishes into the pos
 
 Developer docs · Integrations overview · Core concepts → Tiers and access
 
+
 ========================================================================
 PAGE: Integrations: LMS
 URL: https://docs.aicontentbridge.com/integrations/integrations-lms
 META: slug=integrations-lms | section=Integrations | updated=2026-06-19
 ========================================================================
 
-# LMS (LearnPress & LifterLMS)
+# Integrations: LMS
 
 On the Agency plan, AI Content Bridge can publish learning content directly into your learning management system rather than as plain posts — so a generated lesson or quiz arrives as a real LMS object you can slot into a course.
 
@@ -2454,13 +2913,14 @@ If no supported LMS is active, Training Modules and Quizzes publish as standard 
 
 Content types → Training Module · Content types → Quiz / Assessment · Integrations overview
 
+
 ========================================================================
 PAGE: Integrations: Email
 URL: https://docs.aicontentbridge.com/integrations/integrations-email
 META: slug=integrations-email | section=Integrations | updated=2026-06-19
 ========================================================================
 
-# Email (MailPoet & Newsletter/TNP)
+# Integrations: Email
 
 On the Pro plan and above, an Email Newsletter can drop straight into your email plugin as a draft campaign — so the subject line, preview text and body land where you send from, ready to review.
 
@@ -2480,13 +2940,14 @@ If neither email plugin is active, the Email Newsletter type publishes as a stan
 
 Content types → Email Newsletter · Integrations overview · Troubleshooting → An integration didn't fire
 
+
 ========================================================================
 PAGE: Integrations: Events
 URL: https://docs.aicontentbridge.com/integrations/integrations-events
 META: slug=integrations-events | section=Integrations | updated=2026-06-19
 ========================================================================
 
-# Events (The Events Calendar)
+# Integrations: Events
 
 On the Pro plan and above, an Event Description can publish as a proper calendar event rather than a plain post — so the dates, venue and cost populate The Events Calendar's own fields and the event shows up in your calendar views.
 
@@ -2513,10 +2974,11 @@ If The Events Calendar isn't active, the Event Description type publishes as a s
 
 Content types → Event Description · Integrations overview · Troubleshooting → An integration didn't fire
 
+
 ========================================================================
 PAGE: For agencies
 URL: https://docs.aicontentbridge.com/for-agencies
-META: slug=for-agencies | section=For agencies | updated=2026-06-19
+META: slug=for-agencies | section=For agencies | updated=2026-07-17
 ========================================================================
 
 # For agencies
@@ -2525,7 +2987,7 @@ The Agency plan is built for people producing content across many clients rather
 
 ## Per-client brand voice with Writing Style Profiles
 
-The feature most agencies subscribe for is Writing Style Profiles. You can create a separate profile per client — capturing their tone, sentence style and signature moves, either from a writing sample or a template — and switch between them in a click. Every generation then comes out in that client's voice without re-prompting, so a dozen clients can each sound like themselves. See Core concepts → Brand voice and Writing Style Profiles.
+Agencies subscribe for the breadth of content types, the credit volume and multi-site use — but the feature that makes multi-client work practical day to day is Writing Style Profiles, and it's available on every plan. You can create a separate profile per client — capturing their tone, sentence style and signature moves, either from a writing sample or a template — and switch between them in a click. Every generation then comes out in that client's voice without re-prompting, so a dozen clients can each sound like themselves. See Core concepts → Brand voice and Writing Style Profiles.
 
 ## The full content range
 
@@ -2537,7 +2999,15 @@ Because content publishes through the integrations, you can deliver into whateve
 
 ## Working across multiple client sites
 
-Licences are locked to a domain — a licence registers to the first site it's used on, which keeps it from being used elsewhere. If you manage several client sites, that has practical implications for how many licences and registrations you need, and moving a licence between sites is done by contacting support. If you're setting up across multiple client sites, talk to support about the right arrangement for your agency before you roll out.
+Paid licences are **not** domain-locked. One Starter, Pro or Agency licence works across as many client sites as you like — install the plugin on each and activate it with the same key. Only free licences lock to a single domain.
+
+Credits come from one shared pool, so every site draws on the same monthly allowance. That's usually what you want, since it means you're not stranded with unused credits on a quiet client while a busy one runs out — but it does mean the allowance, not the site count, is what you're planning around.
+
+## Building topic clusters for a client
+
+The Content Strategist can plan supporting content around a page a client already has — usually a service page you want ranking better. It reads that page, plans the posts it's missing, and each one links back up to it automatically when generated. Adding the `[content_cluster]` shortcode to the page lists the supporting posts on it as they publish.
+
+There's no monthly limit on how many clusters you plan, so a client with eight service pages can have a cluster planned around each. The structured plan also makes a straightforward client deliverable in its own right.
 
 ## A sensible workflow
 
@@ -2545,17 +3015,18 @@ A pattern that works well: set up a Writing Style Profile per client first; grou
 
 ## Related
 
-Core concepts → Brand voice and Writing Style Profiles · Content types overview · Integrations · Account & billing
+Content Strategist & topic clusters · Core concepts → Brand voice and Writing Style Profiles · Content types overview · Integrations · Account & billing
+
 
 ========================================================================
 PAGE: Developer docs
 URL: https://docs.aicontentbridge.com/developer-docs
-META: slug=developer-docs | section=Developer docs | updated=2026-06-19
+META: slug=developer-docs | section=Developer docs | updated=2026-08-15
 ========================================================================
 
 # Developer docs
 
-This page is for developers and technically-minded site owners who want to understand how AI Content Bridge works under the hood: the data flow, the external services it relies on, the security model, how it publishes, and how to target custom fields.
+This page is for developers and technically-minded site owners who want to understand how AI Content Bridge works under the hood: the data flow, the external services it relies on, the security model, how it publishes, how to target custom fields, and the REST surface behind inbound links.
 
 ## How it fits together
 
@@ -2595,8 +3066,191 @@ Content is created on your site through the WordPress REST API. For this to work
 
 ## Targeting custom fields (ACF)
 
-When Advanced Custom Fields is active (Pro and above), generated content can be written into a named ACF field on a target post rather than the post body — useful when your theme or page builder renders content from fields. You select the target field at generation time. If no field is targeted, content goes to the post body. See Integrations → Custom fields (ACF).
+When Advanced Custom Fields is active (on any plan), generated content can be written into a named ACF field on a target post rather than the post body — useful when your theme or page builder renders content from fields. You select the target field at generation time. If no field is targeted, content goes to the post body. See Integrations → Custom fields (ACF).
+
+## Inbound links
+
+Inbound linking finds older published posts that could link into a newer one, and inserts the links you approve. It is entirely local to your site: no AI, no calls to the AI Content Bridge service, and no credits. Matching is exact-phrase against the keywords and anchor phrasings already stored on the diary entry, so the same input always produces the same result.
+
+Three REST routes cover the whole feature. All three live under `aicobr/v1`, and all three are also registered under the legacy `ai-content/v1` namespace, which is still aliased for older installs.
+
+### Capabilities
+
+| Route | Capability | Filter context |
+|---|---|---|
+| `inbound-suggestions` | `edit_posts` | `inbound_suggestions` |
+| `insert-inbound-link` | `edit_posts` | `inbound_insert` |
+| `remove-inbound-link` | `edit_posts` | `inbound_remove` |
+
+These are lower than the `manage_options` used by the rest of the plugin, because the routes act on posts rather than on settings. The route-level capability is only the outer gate. Both write routes re-check `edit_post` against the specific source post before touching it, and the scan re-checks it for every candidate it considers, counting the ones you cannot edit under `not_editable`.
+
+All three go through the `aicobr_rest_capability` filter, which receives the default capability and the context string from the table above.
+
+### POST `/aicobr/v1/inbound-suggestions`
+
+Read-only. Writes nothing: no options, no post meta, no post content.
+
+| Field | Type | Notes |
+|---|---|---|
+| `entry_id` | string | Required. The diary entry ID, not the post ID. |
+| `limit` | int | Optional. Defaults to 5, capped at 20. |
+| `force` | bool | Optional. Bypasses the cached scan. |
+
+A successful response:
+
+```json
+{
+  "success": true,
+  "suggestions": [ ... ],
+  "scanned": 74,
+  "found": 17,
+  "limit": 20,
+  "skipped": {
+    "already_links": 0,
+    "page_builder": 0,
+    "phrase_absent": 22,
+    "no_safe_range": 1,
+    "name_collision": 34,
+    "not_editable": 0
+  },
+  "phrases": [ { "phrase": "Ford Transit", "reason": "primary_keyword" } ],
+  "target": { "post_id": 25883, "title": "...", "url": "https://..." },
+  "cached": true
+}
+```
+
+`cached` is only present, and only ever `true`, when the response came from the transient. A fresh scan omits the key.
+
+`scanned` counts candidates returned by the SQL pre-filter, which matches on the longest single word of each phrase rather than the phrase itself. It is therefore not the number of posts containing the phrase. `phrase_absent` is the difference between the two. `found` is the number of opportunities before `limit` is applied, so a UI can honestly say "showing 20 of 34" instead of quietly truncating. The six skip counters plus `found` reconcile against `scanned`.
+
+`phrases` reports exactly what was searched for. This is what makes an empty result actionable: it shows the user that their declared keyword is a long-tail phrase nothing else on the site says, or that an anchor variant is wrong.
+
+Two responses carry a `reason` instead of results:
+
+- `not_published`, with `success: false`. The target post exists but is not published, so a link to it would 404 for readers. Returned before any scanning, and not cached.
+- `no_keywords`, with `success: true` and an empty `suggestions` array. The entry declares no primary keyword, focus keyphrase, anchor variants or usable pillar, so there was nothing to search for. This one is cached, since re-running it would produce the same empty answer.
+
+Each suggestion:
+
+| Field | Notes |
+|---|---|
+| `suggestion_id` | Stable per source post, destination and offset. |
+| `source_post_id`, `source_title`, `source_date` | The older post the link would be written into. |
+| `anchor` | The literal matched text, as it appears in the source. |
+| `reason` | `primary_keyword`, `focus_keyword`, `anchor_variant` or `cluster_pillar`. |
+| `target_post_id`, `target_url`, `target_title` | Where this specific link points. |
+| `start`, `end` | Byte offsets into the source's stored content, at scan time. |
+| `excerpt` | Flattened display text with the anchor wrapped in `<mark>`. |
+| `context` | `{ before, after }`, the re-scan fingerprint. |
+
+The destination is per suggestion, not per scan. A `cluster_pillar` match points at the pillar page rather than at the post being reviewed, so anything consuming this response must group by `target_post_id` rather than assume one destination.
+
+::: warning
+`excerpt` is flattened display text with HTML entities **decoded**. A source post containing `&lt;img onerror=...&gt;` yields real angle brackets. Render it as escaped text, never as HTML. The bundled UI splits it on the `<mark>` tags and emits the segments as text nodes for exactly this reason.
+:::
+
+`start` and `end` are diagnostic only. Do not pass them to the insert route; it does not accept them and would not trust them if it did.
+
+### POST `/aicobr/v1/insert-inbound-link`
+
+Writes one approved link into one source post.
+
+| Field | Type | Notes |
+|---|---|---|
+| `source_post_id` | int | Required. |
+| `phrase` | string | Required. Send the suggestion's `anchor`. |
+| `target_url` | string | Required. |
+| `context` | object | Required in practice. `{ before, after }` from the suggestion. |
+| `target_post_id` | int | Optional. Used to exclude the destination from the name guard. |
+| `target_title` | string | Optional. Written as the anchor's `title` attribute. |
+| `suggestion_id` | string | Optional. Recorded so undo can find this link later. |
+
+Placement is correct or nothing. The byte offset from the scan is never used. The route re-locates the reviewed occurrence in the source post's **current** content by matching the normalised text on either side of it, and writes the link only where that sentence still is. If the post has been edited since the scan, nothing is written.
+
+Success returns `stored_html`, the exact `<a>` element written into the post. Keep it: it is what makes undo surgical.
+
+Three refusals come back as `success: false` with a `reason`:
+
+| Reason | Meaning |
+|---|---|
+| `already_links` | The source already links to that destination. Idempotent, so a retry is safe. |
+| `spot_changed` | The reviewed sentence has moved, changed or gone. Re-scan with `force: true`. |
+| `name_collision` | The phrase now runs into a longer product name on this site, so linking it would split the name. |
+
+`name_collision` is returned here as well as at scan time because the guard is rebuilt server-side on every write rather than trusted from the client. A suggestion approved before a longer product was published is refused now, which is the correct answer: the sentence means something different than it did at review time.
+
+Re-scanning after a `spot_changed` refusal needs `force: true`. Without it the cached scan is served and returns the same stale context.
+
+### POST `/aicobr/v1/remove-inbound-link`
+
+| Field | Type | Notes |
+|---|---|---|
+| `source_post_id` | int | Required. |
+| `suggestion_id` | string | Either this or `stored_html`. |
+| `stored_html` | string | The exact HTML returned at insert time. |
+
+Strips only the stored `<a>` and leaves the anchor text in place. If that exact HTML is no longer in the post, it refuses with `reason: 'not_found'` rather than falling back to a looser pattern, and asks the user to remove the link by hand. A blind regex over prose the user has since rewritten is the one failure this feature must not have.
+
+### Stored data
+
+**Post meta `_aicobr_inbound_links`**, on the **source** post, not the target. An array of:
+
+```php
+[
+  'suggestion_id'  => 'in_1a2b3c4d',
+  'target_post_id' => 25883,
+  'target_url'     => 'https://example.com/ford-transit-review/',
+  'anchor_text'    => 'Ford Transit',
+  'stored_html'    => '<a href="..." class="acb-ilink" title="...">Ford Transit</a>',
+  'inserted_at'    => '2026-08-15 11:58:30',
+  'inserted_by'    => 1,
+]
+```
+
+Entries are removed on undo. This is also the data you would use to enforce a per-source ceiling across targets, which the plugin does not currently impose.
+
+**Option `aicobr_inb_gen`**, an integer generation salt, deliberately not autoloaded. It is part of the scan cache key and is incremented on every insert and undo. Bumping it invalidates every cached scan on the site, which is correct rather than lazy: a cached scan is a set of source post offsets and context fingerprints, so writing to any source post can stale a scan that was run against a completely different target.
+
+The cache key also includes the plugin version, because a cached scan encodes the matching rules that produced it. Without that, updating the plugin would keep serving old-rule results for up to fifteen minutes and the update would look like it had done nothing.
+
+### The anchor ACB writes
+
+Every inserted link carries the class `acb-ilink`:
+
+```html
+<a href="https://example.com/target/" class="acb-ilink" title="Target title">Ford Transit</a>
+```
+
+The class exists so ACB's own links are identifiable in content later, for counting, for reporting and above all for undo, which must find exactly what ACB wrote and never something a user wrote by hand. The plugin adds no styling for it, so you can target it in your theme.
+
+### Filters
+
+```php
+// Which post types the scan searches for candidate source posts.
+// Default: ['post'].
+add_filter( 'aicobr_inbound_link_post_types', function ( $types ) {
+    return array_merge( $types, [ 'page' ] );
+} );
+```
+
+```php
+// Extra product names the guard should protect. Receives the automatic names,
+// the phrases being searched, and the excluded post IDs.
+add_filter( 'aicobr_inbound_guard_names', function ( $names, $phrases, $exclude_ids ) {
+    return array_merge( $names, [ 'Ford Transit Courier', 'Ford Transit 350' ] );
+}, 10, 3 );
+```
+
+The second filter is the escape hatch for names the automatic sources cannot see. The guard learns names from your declared keywords and from published post titles, but only where the name **begins** the title or one of its separated segments. A title like "Reviewing the Ford Transit Courier" names the product in free prose with no separator, and is deliberately not treated as a name: matching mid-prose would turn "Why the Ford Transit still wins in 2026" into a guard that silently suppresses legitimate links. Declare those names here instead.
+
+### What the scan does not do
+
+- It never matches semantically. "Flog my transit" will not match "sell my van", and that is by design. Semantic matching needs a model, which would mean cloud calls, credits and non-determinism, and would make the result impossible to explain when it is wrong.
+- It proposes at most one link per source post per scan, and by default at most five per target.
+- The SQL pre-filter fetches at most 200 candidate posts.
+- It reads post content only. It does not read or write anything through the AI Content Bridge service.
 
 ## Related
 
 Integrations · Core concepts · Troubleshooting & FAQ
+
