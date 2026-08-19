@@ -15,6 +15,7 @@
  */
 
 const express = require('express');
+const { requireGenerateSecret } = require('../lib/require-generate-secret');
 const router  = express.Router();
 const serp    = require('../lib/serp');
 const { Pool } = require('pg');
@@ -85,10 +86,8 @@ async function callClaude(prompt) {
 
 router.post('/', async (req, res) => {
     // Same shared-secret gate as /api/generate
-    const secret = process.env.GENERATE_SECRET;
-    if (secret && req.headers['x-generate-secret'] !== secret) {
-        return res.status(401).json({ success: false, error: 'Unauthorised' });
-    }
+    // AICOBR_FAILCLOSED_SECRET_2026_08 — fail closed (was: skipped when unset)
+    if (!requireGenerateSecret(req, res)) return;
 
     // license_key + domain are sent by plugin builds from 2026-07 onward (the
     // outline proxy in ai-content-bridge.php) purely for cost attribution.

@@ -20,6 +20,7 @@
  */
 
 const { wpFetch } = require('../lib/wp-endpoint');
+const { requireGenerateSecret } = require('../lib/require-generate-secret');
 const express = require('express');
 const router  = express.Router();
 const { Pool } = require('pg');
@@ -483,10 +484,8 @@ router.post('/', async (req, res) => {
     const startTime = Date.now();
 
     // Optional shared secret check — set GENERATE_SECRET in Railway env
-    const secret = process.env.GENERATE_SECRET;
-    if (secret && req.headers['x-generate-secret'] !== secret) {
-        return res.status(401).json({ success: false, error: 'Unauthorised' });
-    }
+    // AICOBR_FAILCLOSED_SECRET_2026_08 — fail closed (was: skipped when unset)
+    if (!requireGenerateSecret(req, res)) return;
 
     const {
         license_key,

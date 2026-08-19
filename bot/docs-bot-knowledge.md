@@ -1,6 +1,6 @@
 # AI Content Bridge — support assistant knowledge base
 
-Generated 2026-08-15 from the live documentation. This is the complete product
+Generated 2026-08-18 from the live documentation. This is the complete product
 documentation. Answer from it, and link people to the URL of the relevant page.
 
 ## Page index
@@ -89,7 +89,15 @@ Everything above describes generating one piece at a time. The **Content Strateg
 
 There are four tiers. Your tier controls which **content types** you can generate, your monthly **credit allowance**, and a few service-level features (LMS publishing, multi-site use, priority support). Higher tiers include everything in the tiers below them.
 
-The plugin's own tools — Brand Voice, Writing Style Profiles, ACF field targeting, YouTube embeds and every ecosystem integration — are part of the plugin and work on **every plan, including Free**. They aren't paywalled; tiers gate the generation service, not the plugin.
+The plugin's own tools — Brand Voice, Writing Style Profiles, YouTube embeds and
+every ecosystem integration — are part of the plugin and work on **every plan,
+including Free**. They aren't paywalled; tiers gate the generation service, not
+the plugin.
+
+ACF (custom fields) is the one split case. **Reading** field text so ACF-driven
+pages can be used as inbound-link sources is local and free on every plan.
+**Writing** generated content into an ACF field happens during generation and is
+a **Pro and Agency** feature. See Integrations → Custom fields (ACF).
 
 - **Free** — the Blog Post type, an AI featured image and SEO meta, on a single site. The entry point.
 - **Starter** — adds Tutorial, FAQ Page, WooCommerce Product, Service Page and About Us, plus the Content Diary.
@@ -254,7 +262,7 @@ Every suggested image comes with alt text written for it, describing what the pi
 ========================================================================
 PAGE: Content Strategist & topic clusters
 URL: https://docs.aicontentbridge.com/content-strategist
-META: slug=content-strategist | section=Core concepts | updated=2026-08-15
+META: slug= | section= | updated=
 ========================================================================
 
 # Content Strategist & topic clusters
@@ -298,7 +306,7 @@ The important detail is that **the pillar is a page you already have.** Usually 
 ### How to do it
 
 1. In the Content Strategist, under **Build a supporting cluster**, choose **Choose an existing page**.
-2. Search for the page and select it. Its title and URL appear as confirmation.
+2. Search for the page and select it. Its title and URL appear as confirmation, with a badge showing which type of content it is.
 3. Fill in the rest of the form as normal and run the plan.
 
 The Strategist reads the page you picked — its title and its actual copy — and plans posts that support it: the questions a visitor to that page would still have afterwards. It deliberately avoids repeating what the page already says.
@@ -310,6 +318,18 @@ Your business location is still needed, as it sets which country's search result
 Every post in the plan shows which pillar it belongs to, and the review step is headed with the page the whole cluster supports. Edit, remove or re-date anything before approving, exactly as with a normal plan.
 
 Leaving the pillar field empty gives you an ordinary content calendar. It's entirely optional.
+
+### Any post type can be a pillar
+
+The picker searches **every public post type** on your site, not just pages and posts. On a site built around custom post types, those types usually *are* the pages worth building clusters under: a Models type holding "Sell my Ford Transit Custom", or a Locations type holding one page per city. Each result carries a badge naming its type, so a title that exists in more than one place is never ambiguous.
+
+Everything downstream works the same way. The link up to the pillar is written into each supporting post as it is generated, and the pillar lists its cluster through the shortcode below.
+
+::: tip Custom post types and page builders
+If your pillar is a custom post type rendered by a page builder, add the cluster block using the builder's own shortcode widget rather than typing it into a content field. This is confirmed working with Elementor and its dynamic-template add-ons.
+:::
+
+A developer can narrow or extend which types are offered. See Developer docs, Filters.
 
 ### The links are written for you
 
@@ -380,11 +400,19 @@ Select a cluster and a bar appears with the pillar page's name, its progress and
 
 **Can I delete a brief and its post together?** Yes. When you delete a brief that produced content, you're asked separately whether to move that post to the WordPress trash. It defaults to no, it's always the trash rather than permanent deletion, and it only ever applies to posts AI Content Bridge created.
 
+## Seeing how much of a plan you have built
+
+A plan is only worth what gets published. The cluster report shows how much of a cluster exists, how many links point at your pillar, how many links ACB has inserted into it, and what is still unpublished. Open it from the Content Diary with a cluster selected. See The cluster report.
+
+## Related
+
+The cluster report · Inbound links · Core concepts · Developer docs
+
 
 ========================================================================
 PAGE: Inbound links
 URL: https://docs.aicontentbridge.com/inbound-links
-META: slug=inbound-links | section=Core concepts | updated=2026-08-15
+META: slug= | section= | updated=
 ========================================================================
 
 # Inbound links
@@ -516,15 +544,25 @@ Published posts only, and by default only the **post** type. Pages, products and
 
 ACB proposes at most one link per source post per scan, so a single old article never picks up several links to the same target at once.
 
+A single pass takes up to 800 candidate posts per search word, oldest first. Older pages have had longer to accrue authority, so they are the better link sources, but it is a bias rather than a neutral sample. If a scan hits that ceiling you are told, and the counts are shown as a minimum rather than presented as the whole catalogue.
+
+### Pages that keep their text in custom fields
+
+If a post type stores its body text in ACF fields rather than the main editor, its post body is empty and it matches nothing, so it was skipped before anything read it. Tell ACB which fields hold your text in **Settings → Content stored in custom fields** and those pages become usable link sources. Where the field is a WYSIWYG editor, approved links are written into it directly. See Integrations → Custom fields (ACF).
+
+## Seeing the result
+
+The cluster report shows how many links point at your pillar and how many ACB has inserted into the cluster, alongside what is still unpublished. See The cluster report.
+
 ## Related
 
-Content Strategist & topic clusters · Core concepts · Developer docs · Troubleshooting & FAQ
+Content Strategist & topic clusters · The cluster report · Integrations → Custom fields (ACF) · Core concepts · Developer docs · Troubleshooting & FAQ
 
 
 ========================================================================
 PAGE: Troubleshooting & FAQ
 URL: https://docs.aicontentbridge.com/troubleshooting
-META: slug=troubleshooting | section=Troubleshooting & FAQ | updated=2026-07-17
+META: slug= | section= | updated=
 ========================================================================
 
 # Troubleshooting & FAQ
@@ -539,7 +577,7 @@ First, the reassuring part: **a failed generation doesn't cost you credits.** Cr
 
 **"Insufficient credits"** — you don't have enough credits for this generation. Remember the cost is the content type's base cost plus 1 if you've added an image. A second, easy-to-miss cause: **credits expire**. Monthly allowances have an expiry, and expired credits no longer count toward a generation even if an old total still seems to show. Fix it by checking your live balance in the portal, buying a one-time bundle (bundles don't expire), waiting for your monthly reset, or lowering the cost — drop the image or pick a lighter type.
 
-**"The [type] content type is not available on your current plan"** — a tier gate. That content type is on a higher plan than yours. Upgrade to unlock it, or pick a type your plan includes. Note this gate applies to content *types* only — the plugin's own tools (Writing Style Profiles, ACF field targeting, YouTube embeds, Brand Voice) work on every plan, including Free.
+**"The [type] content type is not available on your current plan"** — a tier gate. That content type is on a higher plan than yours. Upgrade to unlock it, or pick a type your plan includes. Note this gate applies to content *types* only — the plugin's own tools (Writing Style Profiles, YouTube embeds, Brand Voice) work on every plan, including Free. ACF is the exception: reading field text for inbound linking is free, but writing generated content into an ACF field is a Pro and Agency feature.
 
 **"This license is registered to [domain]…"** — you're on the **free plan**, which locks to the first site the licence is used on. Only free licences are domain-locked; Starter, Pro and Agency work across as many sites as you like. Either upgrade, or contact support to transfer the free licence to the new domain.
 
@@ -600,6 +638,28 @@ That's expected for most types. The editable outline-review step only runs for k
 ## An integration didn't fire
 
 Integrations are detected automatically from the plugins active on your site. If the target plugin — WooCommerce, an SEO plugin, an LMS, MailPoet, Newsletter or The Events Calendar — isn't installed and active, AI Content Bridge falls back to a standard post. Confirm the plugin is active, and that you're on a tier that includes the integration (ACF targeting and the LMS suite are gated by plan).
+
+## "That field is not a WYSIWYG field"
+
+You approved an inbound link whose matched phrase lives in a plain text or textarea custom field. A link written into one of those renders as visible angle brackets instead of a link, so ACB refuses rather than breaking the page. Add the link yourself in the page editor. Reading that field to find matches still works, so the suggestion was not wrong, only unwritable.
+
+## Inbound links finds nothing on my custom post type
+
+Most often the type keeps its body text in ACF fields rather than the main editor, so its post body is empty and matches nothing. Tick the type and its fields under Settings, Content stored in custom fields. See Integrations, Custom fields (ACF).
+
+If you are comfortable with WP-CLI, `wp eval-file wp-content/plugins/ai-content-bridge/acb-diagnose-content.php` prints where each post type actually stores its content. It writes nothing and is safe to run on a live site.
+
+## My custom post type does not appear in the pillar picker
+
+The picker lists every **public** post type. A type registered as non-public, or excluded from search and views, will not appear. A developer can also have narrowed the list with the `aicobr_pillar_post_types` filter.
+
+## The cluster report shows a huge number of links in
+
+Check whether your pillar is your home page. If it is, you will see a note saying so. Sites link home from many pages at once through a shared template, breadcrumb or logo, so the figure can reflect one repeated link rather than pages written individually. Watch "From this cluster" and "Links ACB inserted" instead, since those two respond directly to your work.
+
+## The cluster report says a link ACB built is no longer there
+
+ACB's record says it inserted a link and your content no longer contains that exact link, almost always because the post was later edited by hand. ACB will not guess at rewritten text, so it reports the disagreement rather than repairing it. Re-scan the post to insert a fresh link if you still want one.
 
 ## Getting support
 
@@ -2783,7 +2843,7 @@ How detection works, in one sentence: when you generate, the plugin checks which
 |---|---|---|---|
 | [SEO plugins](integrations-seo) | Yoast, Rank Math, SEOPress | Writes the generated SEO title, description, focus keyword and social tags into the plugin's own fields | All plans |
 | [WooCommerce](integrations-woocommerce) | WooCommerce | Publishes the WooCommerce Product type as a real product with price and SKU | Starter+ |
-| [Custom fields (ACF)](integrations-acf) | Advanced Custom Fields | Writes generated content into a specific ACF field rather than the post body | All plans |
+| [Custom fields (ACF)](integrations-acf) | Advanced Custom Fields | Reads field text as inbound-link sources (all plans); writes generated content into a specific ACF field (Pro and Agency) | Mixed |
 | [LMS](integrations-lms) | LearnPress, LifterLMS | Publishes Training Modules as lessons and Quizzes as LMS quizzes | Agency |
 | [Email](integrations-email) | MailPoet, Newsletter (TNP) | Drops an Email Newsletter into the tool as a draft campaign | Pro+ |
 | [Events](integrations-events) | The Events Calendar | Publishes an Event Description as a calendar event with dates, venue and cost | Pro+ |
@@ -2858,28 +2918,126 @@ Content types → WooCommerce Product · Integrations overview · Troubleshootin
 ========================================================================
 PAGE: Integrations: Custom fields (ACF)
 URL: https://docs.aicontentbridge.com/integrations/integrations-acf
-META: slug=integrations-acf | section=Integrations | updated=2026-07-17
+META: slug=integrations-acf | section=Integrations | updated=2026-08-18
 ========================================================================
 
 # Integrations: Custom fields (ACF)
 
-Advanced Custom Fields support lets you send generated content into a specific custom field rather than the post body. It's for theme-driven and page-builder setups where your layout reads content from named fields instead of the main editor. ACF field targeting is a built-in plugin feature and is available on **every plan** — including Free. Which content *types* you can generate still depends on your plan (see Tiers and access), but targeting a field is not itself a paid unlock.
+Advanced Custom Fields support covers two separate jobs, and they sit on
+different plans. ACB can **read** the fields that hold your body text so those
+pages can be used by inbound linking, and it can **write** generated content
+into a named field instead of the post body.
 
-## What it does
+**Reading** field content is a local feature with no tier gate: it works on
+**every plan, including Free**, because it never calls the generation service.
+**Writing** generated content into a field is part of generation and is
+available on the **Pro and Agency plans**. Which content *types* you can
+generate still depends on your plan as well.
 
-Detected when Advanced Custom Fields is active on your site. With ACF present, you can choose a target field, and the generated content is written into that field on the post you're updating — rather than into the post body. This keeps content flowing into whatever structure your theme or templates expect.
+Detected automatically when Advanced Custom Fields is active. There is nothing
+to connect.
 
-If ACF isn't active, or you don't choose a field, content publishes into the post body as normal.
+## Writing generated content into a field
 
-## Notes and tips
+Available on the **Pro and Agency plans**. For theme-driven and page-builder
+setups where your layout reads content from named fields rather than the main
+editor. Choose a target field at generation time and the generated content is
+written there instead of into the post body. If ACF is not active, or you choose
+no field, content publishes to the post body as normal.
 
-- This is an advanced option; most users publish to the post body and never need it.
-- Make sure ACF is active and the target field exists on the post type you're writing to.
-- For the technical detail — how a field is targeted and written — see the Developer docs.
+On the Free and Starter plans, generating with a target field selected is
+refused before any credits are spent, with a message naming the plans that
+include it. Remove the target field to generate into the post body, or upgrade.
+
+This is an advanced option. Most sites publish to the post body and never need
+it.
+
+## Reading content stored in fields
+
+This is the more consequential half, and it exists because of a specific
+failure. If your pages keep their body text in ACF fields, the post body itself
+is **empty**. Inbound linking searches post content for the phrases you
+declared, so those pages matched nothing and were dropped before anything ever
+read them. On a programmatic-SEO site, where the pages that matter are custom
+post types filled from fields, that meant the feature could not see most of the
+site.
+
+### Setting it up
+
+In **Settings → Content stored in custom fields**, tick the post types that keep
+their body text in fields, then choose which fields hold it. For each type you
+get a checklist of the fields ACF actually reports, showing each field's label,
+its name, its type, and whether links can be inserted into it. You never have to
+remember a field name.
+
+Leave a type unticked if it uses the normal editor. Only tick the fields that
+hold **prose**. A field holding a price, a registration number or a postcode
+adds noise and no linking opportunities.
+
+Only text, textarea and WYSIWYG fields are offered, because those are the ones
+that hold prose and the ones ACB can read reliably.
+
+### What it changes
+
+Once configured, those pages become usable as **link sources**. Their field text
+is read alongside the post body, so a phrase living in a field is found exactly
+as one in the editor would be.
+
+::: tip The cluster report is unaffected
+The report counts `href` links, and those live in post content even on a
+field-driven site. It does not use this setting and does not need to.
+:::
+
+### Inserting links into fields
+
+Where a matched phrase lives in a **WYSIWYG** field, an approved link is written
+straight into that field, and undo removes it from the same place.
+
+Where the field is **plain text or textarea**, insertion is refused and you are
+told why. A link written into a plain-text field renders as visible angle
+brackets rather than a link, so writing one would break the page. Reading the
+field to find matches is unaffected. Add the link yourself in the page editor.
+
+ACB reads the field type from ACF rather than asking you, and detection wins over
+anything set by hand: a field you have labelled WYSIWYG is still refused if ACF
+reports otherwise. The manual selector appears only when ACF cannot be asked,
+such as when ACF is inactive or the field is not an ACF field at all. A type ACB
+cannot determine is refused, which is the safe default.
+
+::: warning Worth a five-minute check on staging first
+Standard ACF WYSIWYG output renders HTML normally. Some page-builder dynamic-tag
+setups pass field values through their own render path, and how that path treats
+HTML is up to the builder. Before enabling insertion on a production site, put
+`<a href="https://example.com">test</a>` into the actual field, view the page,
+and confirm it renders as a link rather than literal angle brackets.
+:::
+
+## Which storage patterns are covered
+
+Three arrangements are common. Being straight about which are covered saves an
+hour of confusion.
+
+| Pattern | Covered |
+|---|---|
+| Each page's body text in its own ACF fields | **Yes.** This is what the feature is for. |
+| Each page's text in ACF fields, rendered through page-builder dynamic tags | **Yes** for reading and matching. Check the render path before enabling insertion. |
+| One shared template holding the prose, with ACF shortcodes for the variable bits | **No.** |
+
+The third case is not a limitation that can be engineered away. The prose is not
+per page, so there is nothing page-specific to match against, and every page
+would produce the same result. It is also worth knowing that near-duplicate
+pages of this shape tend to perform poorly in search regardless. Moving to
+per-page fields fixes both problems at once.
+
+## Notes
+
+- ACB reads field values directly from post meta, so reading works whether or not ACF is active.
+- Repeater and group fields are flattened to their text values for matching.
+- Changing the configuration clears the cached scans that used the old one.
 
 ## Related
 
-Developer docs · Integrations overview · Core concepts → Tiers and access
+Inbound links · Developer docs · Integrations overview · Core concepts → Tiers and access
 
 
 ========================================================================
@@ -3021,7 +3179,7 @@ Content Strategist & topic clusters · Core concepts → Brand voice and Writing
 ========================================================================
 PAGE: Developer docs
 URL: https://docs.aicontentbridge.com/developer-docs
-META: slug=developer-docs | section=Developer docs | updated=2026-08-15
+META: slug= | section= | updated=
 ========================================================================
 
 # Developer docs
@@ -3066,7 +3224,11 @@ Content is created on your site through the WordPress REST API. For this to work
 
 ## Targeting custom fields (ACF)
 
-When Advanced Custom Fields is active (on any plan), generated content can be written into a named ACF field on a target post rather than the post body — useful when your theme or page builder renders content from fields. You select the target field at generation time. If no field is targeted, content goes to the post body. See Integrations → Custom fields (ACF).
+ACF support covers two independent jobs.
+
+**Writing generated content into a field (Pro and Agency).** With Advanced Custom Fields active, generated content can be written into a named ACF field on a target post rather than the post body — useful when your theme or page builder renders content from fields. You select the target field at generation time. If no field is targeted, content goes to the post body. Writing into a field is gated to the Pro and Agency plans: the generation service returns `403` with `code: "acf_locked"` before any credit is deducted if a target field is supplied on a lower plan.
+
+**Reading the fields that hold body text.** A post type whose prose lives in ACF fields has an empty `post_content`, so it matched nothing and was excluded from inbound-link scanning before anything read it. Configuring `acf_content_fields` makes those posts usable as link sources, and links can be inserted into WYSIWYG fields. See Settings keys and Reading content stored in custom fields below, and Integrations → Custom fields (ACF).
 
 ## Inbound links
 
@@ -3081,6 +3243,8 @@ Three REST routes cover the whole feature. All three live under `aicobr/v1`, and
 | `inbound-suggestions` | `edit_posts` | `inbound_suggestions` |
 | `insert-inbound-link` | `edit_posts` | `inbound_insert` |
 | `remove-inbound-link` | `edit_posts` | `inbound_remove` |
+| `cluster-stats` | `edit_posts` | `cluster_stats` |
+| `link-forecast` | `edit_posts` | `link_forecast` |
 
 These are lower than the `manage_options` used by the rest of the plugin, because the routes act on posts rather than on settings. The route-level capability is only the outer gate. Both write routes re-check `edit_post` against the specific source post before touching it, and the scan re-checks it for every candidate it considers, counting the ones you cannot edit under `not_editable`.
 
@@ -3121,6 +3285,8 @@ A successful response:
 
 `cached` is only present, and only ever `true`, when the response came from the transient. A fresh scan omits the key.
 
+The response also carries `truncated` (bool), `truncated_tokens` (string[]) and `candidate_cap` (int) when the pre-filter hit its ceiling, and `found_by_target`, a map of destination post ID to pre-cap count. Because spoke-destined anchors are tried before the pillar, those counts are disjoint: the pillar figure is exactly the sources that could reach *only* the pillar.
+
 `scanned` counts candidates returned by the SQL pre-filter, which matches on the longest single word of each phrase rather than the phrase itself. It is therefore not the number of posts containing the phrase. `phrase_absent` is the difference between the two. `found` is the number of opportunities before `limit` is applied, so a UI can honestly say "showing 20 of 34" instead of quietly truncating. The six skip counters plus `found` reconcile against `scanned`.
 
 `phrases` reports exactly what was searched for. This is what makes an empty result actionable: it shows the user that their declared keyword is a long-tail phrase nothing else on the site says, or that an anchor variant is wrong.
@@ -3142,6 +3308,7 @@ Each suggestion:
 | `start`, `end` | Byte offsets into the source's stored content, at scan time. |
 | `excerpt` | Flattened display text with the anchor wrapped in `<mark>`. |
 | `context` | `{ before, after }`, the re-scan fingerprint. |
+| `field` | Empty string for `post_content`, otherwise the meta key the match was found in. Pass it back on insert and undo. |
 
 The destination is per suggestion, not per scan. A `cluster_pillar` match points at the pillar page rather than at the post being reviewed, so anything consuming this response must group by `target_post_id` rather than assume one destination.
 
@@ -3164,6 +3331,7 @@ Writes one approved link into one source post.
 | `target_post_id` | int | Optional. Used to exclude the destination from the name guard. |
 | `target_title` | string | Optional. Written as the anchor's `title` attribute. |
 | `suggestion_id` | string | Optional. Recorded so undo can find this link later. |
+| `field` | string | Optional. The suggestion's `field`. Empty or absent writes to `post_content`. Validated against `^[A-Za-z0-9_-]+$`. |
 
 Placement is correct or nothing. The byte offset from the scan is never used. The route re-locates the reviewed occurrence in the source post's **current** content by matching the normalised text on either side of it, and writes the link only where that sentence still is. If the post has been edited since the scan, nothing is written.
 
@@ -3176,6 +3344,7 @@ Three refusals come back as `success: false` with a `reason`:
 | `already_links` | The source already links to that destination. Idempotent, so a retry is safe. |
 | `spot_changed` | The reviewed sentence has moved, changed or gone. Re-scan with `force: true`. |
 | `name_collision` | The phrase now runs into a longer product name on this site, so linking it would split the name. |
+| `field_not_writable` | The named field is not a WYSIWYG field, so an inserted `<a>` would render as literal angle brackets. Reading that field for matching is unaffected. |
 
 `name_collision` is returned here as well as at scan time because the guard is rebuilt server-side on every write rather than trusted from the client. A suggestion approved before a longer product was published is refused now, which is the correct answer: the sentence means something different than it did at review time.
 
@@ -3188,6 +3357,8 @@ Re-scanning after a `spot_changed` refusal needs `force: true`. Without it the c
 | `source_post_id` | int | Required. |
 | `suggestion_id` | string | Either this or `stored_html`. |
 | `stored_html` | string | The exact HTML returned at insert time. |
+
+The field the link was written into is recovered from the stored record, not from the request, so undo always strips from the same place it wrote. Records created before field support have no `field` key, which correctly resolves to `post_content`.
 
 Strips only the stored `<a>` and leaves the anchor text in place. If that exact HTML is no longer in the post, it refuses with `reason: 'not_found'` rather than falling back to a looser pattern, and asks the user to remove the link by hand. A blind regex over prose the user has since rewritten is the one failure this feature must not have.
 
@@ -3202,6 +3373,7 @@ Strips only the stored `<a>` and leaves the anchor text in place. If that exact 
   'target_url'     => 'https://example.com/ford-transit-review/',
   'anchor_text'    => 'Ford Transit',
   'stored_html'    => '<a href="..." class="acb-ilink" title="...">Ford Transit</a>',
+  'field'          => '',   // '' = post_content, otherwise the ACF meta key
   'inserted_at'    => '2026-08-15 11:58:30',
   'inserted_by'    => 1,
 ]
@@ -3223,6 +3395,153 @@ Every inserted link carries the class `acb-ilink`:
 
 The class exists so ACB's own links are identifiable in content later, for counting, for reporting and above all for undo, which must find exactly what ACB wrote and never something a user wrote by hand. The plugin adds no styling for it, so you can target it in your theme.
 
+## The cluster report
+
+Execution state for one topic cluster. It reports **links only** and says nothing
+about rankings, positions or traffic, because ACB does not observe search results.
+It is also not a site-wide link graph: the unit is one cluster, which is small, so
+inbound counts are one query per target rather than a resolved graph.
+
+### POST `/aicobr/v1/cluster-stats`
+
+Read-only execution state for one cluster. Gated on `edit_posts`, filter context
+`cluster_stats`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `pillar_post_id` | int | Required. |
+
+Returns two deliberately separate scopes. `inbound` counts links **pointing at
+the pillar**, split by whether the linking post belongs to the cluster
+(`from_spokes`) or not (`from_catalogue`). `sideways`, `briefs` and `ledger`
+describe **the cluster itself**.
+
+```json
+{
+  "success": true,
+  "pillar": { "post_id": 55, "title": "...", "url": "...", "is_front_page": false },
+  "inbound": { "total": 226, "from_catalogue": 225, "from_spokes": 1 },
+  "sideways": 3,
+  "sideways_to_unpublished": 1,
+  "truncated": false,
+  "briefs": { "total": 12, "published": 7, "written": 3, "planned": 2 },
+  "ledger": { "built": 14, "broken": 1, "recent": [ ... ] },
+  "entries": [ ... ]
+}
+```
+
+Notes that matter if you consume this:
+
+- **Links are counted in `post_content` only.** Menus, widgets, footers and theme templates are invisible by design. Counting navigation would give every page an inbound count equal to the page count.
+- **Every known form of the pillar's URL is counted**, not just its current permalink. A spoke's up-link is written using the URL stored on the entry at generation time, which differs from `get_permalink()` once a page becomes the front page. One source linking to two forms is one link.
+- **A URL is not matched by prefix.** A trailing slash ends a URL only when followed by a quote, `?`, `#` or end of string. `/we-buy-any-van/` therefore does not match `/we-buy-any-van-in-birmingham/`.
+- **`ledger.built` is scoped by TARGET**, counting links ACB inserted that point at the pillar or one of its spokes. Source posts are ordinary catalogue posts belonging to no cluster, so scoping by source would return nothing.
+- **`ledger.broken`** means ACB's record says it wrote a link and the exact stored HTML is no longer in the post. Reported, never silently corrected: the disagreement is the information.
+- **`truncated`** means a count hit the 2,000-row ceiling, so every inbound figure is a minimum.
+- `is_front_page` is true when the pillar is the site's front page, which changes what the inbound count means rather than whether it is correct.
+
+### POST `/aicobr/v1/link-forecast`
+
+Read-only, and read-only about a post that **does not exist yet**. Given a brief
+with no generated post, it answers how many existing posts will be able to link
+to it once it is published. Gated on `edit_posts`, filter context
+`link_forecast`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `entry_id` | string | Required. A diary entry, generated or not. |
+| `limit` | int | Optional. Named examples to return. |
+
+This is the same code path as `inbound-suggestions` with no target post, so the
+scanner, the catalogue query, the name guard and every skip reason are identical.
+The forecast is an exact prediction of the scan's own later behaviour rather than
+an estimate.
+
+```json
+{
+  "success": true,
+  "forecast": true,
+  "spoke_sources": 4,
+  "pillar_sources": 22,
+  "pillar": { "post_id": 55, "title": "...", "url": "...", "lists_spokes": true },
+  "skipped": { ... },
+  "phrases": [ ... ]
+}
+```
+
+`spoke_sources` and `pillar_sources` are reported apart and must not be summed
+into one health figure. A cluster's pillar phrase is identical for every spoke in
+that cluster, so folding pillar matches into each brief would make every brief
+look well connected and the zero state would never appear. A pillar match does
+not rescue a spoke with no sources, because the link points somewhere else.
+
+`lists_spokes` is true when the pillar carries the cluster shortcode. If it does,
+it lists each spoke as that spoke publishes, so the spoke does receive an inbound
+link regardless of what the catalogue offers.
+
+::: tip No UI consumes this at present
+The forecast columns were removed from the plan-review screen because a
+prediction of link volume did not help a user decide whether to approve a plan.
+The endpoint remains supported for integrators, and it is the data a site-wide
+link worklist would be built on.
+:::
+
+### Settings keys
+
+Both live inside the `aicobr_settings` option.
+
+| Key | Shape | Purpose |
+|---|---|---|
+| `acf_content_fields` | `[ post_type => [ field, ... ] ]` | Fields holding body text for a post type. Widens the scan's SQL pre-filter with a join on those meta keys and folds their values onto `post_content` for matching. |
+| `acf_field_types` | `[ "post_type.field" => type ]` | Manually declared field types, used **only** where ACF cannot be asked. Detection via `get_field_object()` always wins. |
+| `inbound_post_types` | `string[]` | Post types the scan searches. Validated against `post_type_exists()` and `is_post_type_viewable()`, then passed through `aicobr_inbound_link_post_types`. |
+
+Field values are read straight from post meta rather than through `get_field()`,
+so reading works whether or not ACF is loaded. Repeaters and groups are flattened
+to their scalar leaves. Changing `acf_content_fields` invalidates cached scans.
+
+::: warning Writability is detected, not declared
+A field is writable only when ACF reports it as `wysiwyg`. A field the user has
+labelled WYSIWYG by hand is still refused if ACF says otherwise, and a type that
+cannot be determined is refused. Detection resolves the field against the most
+recent published post of the type, because a field group is a property of the
+type rather than of any one post.
+:::
+
+### Reading content stored in custom fields
+
+Internally, the matched body for a candidate source is `post_content` with each
+configured field's value appended. A per-field span map records where each field
+landed, so a match found in the combined body is attributed back to the exact
+field, and insertion writes to that field rather than to the concatenation. The
+span map is internal and never sent to the client.
+
+The re-scan fingerprint and the review excerpt for a field match are computed
+against **that field's own value**, not the combined body, because the insert
+route re-scans the field alone. Taking them from the combined body would bleed
+neighbouring text into the before-context and the re-find would drift.
+
+The cluster report deliberately does **not** use this map. It counts `href`
+links, which live in `post_content` even on a field-driven site.
+
+### A read-only content diagnostic
+
+`acb-diagnose-content.php` ships with the plugin and reports, per post type,
+where content actually lives. Run it with WP-CLI:
+
+```bash
+wp eval-file wp-content/plugins/ai-content-bridge/acb-diagnose-content.php
+```
+
+For each public post type it prints how many published posts store their text in
+`post_content`, in `_elementor_data`, in both, or in neither, how many contain
+links in content, and how many the inbound scan would skip. It writes nothing
+and is safe on production.
+
+Reach for it before theorising. "Why does the scan find nothing on my custom post
+type" is answered in one command: if a type reports empty `post_content`, its
+text is in fields and `acf_content_fields` is the fix.
+
 ### Filters
 
 ```php
@@ -3241,16 +3560,30 @@ add_filter( 'aicobr_inbound_guard_names', function ( $names, $phrases, $exclude_
 }, 10, 3 );
 ```
 
-The second filter is the escape hatch for names the automatic sources cannot see. The guard learns names from your declared keywords and from published post titles, but only where the name **begins** the title or one of its separated segments. A title like "Reviewing the Ford Transit Courier" names the product in free prose with no separator, and is deliberately not treated as a name: matching mid-prose would turn "Why the Ford Transit still wins in 2026" into a guard that silently suppresses legitimate links. Declare those names here instead.
+```php
+// Which post types may be chosen as a cluster pillar in the Content Strategist.
+// Defaults to every PUBLIC post type. Narrow it to keep the picker focused.
+add_filter( 'aicobr_pillar_post_types', function ( $types ) {
+    return [ 'page', 'vehicle_model' ];
+} );
+```
+
+The pillar picker (`GET /aicobr/v1/pages`) queries every public post type and
+returns a `type_label` on each result so the UI can badge it. The downstream
+cluster pipeline resolves the pillar through `get_post()`, `get_permalink()` and
+`get_post_status()`, all of which are post-type agnostic, so nothing else needed
+to change to support custom post types as pillars.
+
+The guard-names filter is the escape hatch for names the automatic sources cannot see. The guard learns names from your declared keywords and from published post titles, but only where the name **begins** the title or one of its separated segments. A title like "Reviewing the Ford Transit Courier" names the product in free prose with no separator, and is deliberately not treated as a name: matching mid-prose would turn "Why the Ford Transit still wins in 2026" into a guard that silently suppresses legitimate links. Declare those names here instead.
 
 ### What the scan does not do
 
 - It never matches semantically. "Flog my transit" will not match "sell my van", and that is by design. Semantic matching needs a model, which would mean cloud calls, credits and non-determinism, and would make the result impossible to explain when it is wrong.
 - It proposes at most one link per source post per scan, and by default at most five per target.
-- The SQL pre-filter fetches at most 200 candidate posts.
+- The SQL pre-filter fetches at most 800 candidate posts **per search word**, ordered oldest first. Hitting that ceiling sets `truncated` and lists the words responsible in `truncated_tokens`, so `scanned` is reported as a floor rather than presented as a total. A separate 200-row ceiling applies to the post-title query that feeds the name guard.
 - It reads post content only. It does not read or write anything through the AI Content Bridge service.
 
 ## Related
 
-Integrations · Core concepts · Troubleshooting & FAQ
+Integrations · Integrations → Custom fields (ACF) · Inbound links · The cluster report · Core concepts · Troubleshooting & FAQ
 

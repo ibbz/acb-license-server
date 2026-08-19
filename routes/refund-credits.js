@@ -9,6 +9,7 @@
  */
 
 const express = require('express');
+const { requireGenerateSecret } = require('../lib/require-generate-secret');
 const router  = express.Router();
 const { Pool } = require('pg');
 const creditsCache = require('../lib/credits-cache');
@@ -20,10 +21,8 @@ const pool = new Pool({
 
 router.post('/', async (req, res) => {
     // Auth — same shared secret as generate endpoint
-    const secret = process.env.GENERATE_SECRET;
-    if (secret && req.headers['x-generate-secret'] !== secret) {
-        return res.status(401).json({ success: false, error: 'Unauthorised' });
-    }
+    // AICOBR_FAILCLOSED_SECRET_2026_08 — fail closed (was: skipped when unset)
+    if (!requireGenerateSecret(req, res)) return;
 
     const { license_key, credits = 1, reason = 'reset_refund', entry_id } = req.body;
 

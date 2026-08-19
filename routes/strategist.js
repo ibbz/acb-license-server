@@ -45,6 +45,7 @@ const serpEvents  = require('../lib/serp-events');
 const creditsCache = require('../lib/credits-cache');
 const creditLedger = require('../lib/credit-ledger');
 const { fetchWithRetry } = require('../lib/http-retry');
+const { requireGenerateSecret } = require('../lib/require-generate-secret');
 const costLog      = require('../lib/cost-log');
 
 const TEXT_MODEL = 'claude-sonnet-4-6'; // must have a matching entry in lib/pricing.js
@@ -84,9 +85,12 @@ const RESEARCH_TTL_MS   = 6 * 60 * 60 * 1000; // cache SERP grounding per keywor
 const MAX_SEED_KEYWORDS = 12;
 
 // ─── helpers: secret gate, JSON parse, Claude call (mirror outline.js) ───────
-function unauthorised(req) {
-  const secret = process.env.GENERATE_SECRET;
-  return secret && req.headers['x-generate-secret'] !== secret;
+// AICOBR_FAILCLOSED_SECRET_2026_08 — was fail-open (skipped when GENERATE_SECRET
+// unset). Now delegates to the shared fail-closed guard, which sends the response
+// itself; this shim keeps the two existing `if (unauthorised(req, res)) return;`
+// call sites reading naturally while inverting the sense (true == handled/blocked).
+function unauthorised(req, res) {
+  return !requireGenerateSecret(req, res);
 }
 
 function parseJsonLoose(text) {
@@ -615,7 +619,7 @@ function parsePlanInputs(body) {
 // ═══ POST /api/strategist/preview ════════════════════════════════════════════
 // No charge, no AI, no SERP. Resolves palette + dates + cost for the commit screen.
 router.post('/preview', async (req, res) => {
-  if (unauthorised(req)) return res.status(401).json({ success: false, error: 'Unauthorised' });
+  if (unauthorised(req, res)) return; // guard sends its own 401/503
 
   try {
     const { params, license_key } = parsePlanInputs(req.body);
@@ -671,7 +675,7 @@ router.post('/preview', async (req, res) => {
 
 // ═══ POST /api/strategist/plan ═══════════════════════════════════════════════
 router.post('/plan', async (req, res) => {
-  if (unauthorised(req)) return res.status(401).json({ success: false, error: 'Unauthorised' });
+  if (unauthorised(req, res)) return; // guard sends its own 401/503
 
   const { business, seeds, researchSeeds, params, exclude, pillar, license_key, serp_gl } = parsePlanInputs(req.body);
 

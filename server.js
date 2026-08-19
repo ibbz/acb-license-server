@@ -205,7 +205,24 @@ app.use('/api/wizard-event',            require('./routes/wizard-event'));
 app.use('/api/extract-style',           require('./routes/extract-style'));
 app.use('/api/usage',                   require('./routes/usage'));
 app.use('/api/stripe-webhook',          require('./routes/stripe-webhook'));
-app.use('/api/buy-credits',             require('./routes/buy-credits'));
+// AICOBR_BUYCREDITS_UNMOUNT_2026_08
+// /api/buy-credits was mounted with NO authentication: no shared secret, no admin
+// gate, no Stripe signature. It accepted { license_key, credits } from any caller
+// and inserted a never-expiring credit_batch, with no upper bound on `credits`.
+// Anyone holding a licence key -- which every free user has, stored in their own
+// wp_options -- could mint unlimited credits against a metered API.
+//
+// It had no caller. Its own docblock claimed the Stripe webhook used it, but
+// stripe-webhook.js does the same INSERT inline ("to avoid HTTP call to
+// ourselves"), reading the credit count from Stripe session metadata that the
+// SERVER set from the BUNDLES table -- the client only ever sends a bundle_id.
+// So the trusted path is: server prices the bundle, Stripe confirms payment,
+// signature-verified webhook grants. This route was that INSERT with the trust
+// removed.
+//
+// routes/buy-credits.js is left on disk, unmounted and unloaded, so the history
+// is legible. Delete it once this has been live for a release.
+// app.use('/api/buy-credits',          require('./routes/buy-credits'));
 app.use('/api/credits',                 require('./routes/credits'));
 app.use('/api/deduct-credit',           require('./routes/deduct-credit'));
 app.use('/api/refund-credits',          require('./routes/refund-credits'));
@@ -262,6 +279,17 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`🚀 ACB License Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  // AICOBR_FAILCLOSED_SECRET_2026_08 — surface a missing shared secret at boot,
+  // not only when a request happens to hit a guarded route. With it unset, every
+  // shared-secret route now fails closed (503), so generation/outlines/refunds
+  // will all refuse until it is set.
+  if (!process.env.GENERATE_SECRET) {
+    console.error(
+      '⚠️  GENERATE_SECRET is not set. Shared-secret routes (generate, outline, ' +
+      'strategist, image-suggestions, regenerate-image, extract-style, ' +
+      'refund-credits) will refuse all requests with 503 until it is configured.'
+    );
+  }
 });
 
 // Generation can take a while — extend timeouts beyond Railway's 30s default.
