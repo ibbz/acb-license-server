@@ -353,11 +353,12 @@ Rules:
 This is a REFRESH of an article that is already published. Your task is NOT to write a brand-new article — it is to produce an improved, updated, more complete and more competitive version of the article below, using the outline/structure above as the target shape.
 
 How to refresh it well:
-- Read it first and keep what already works: accurate facts, useful specifics, real examples, the author's angle and intent.
+- Keep the SUBSTANCE that works: the accurate facts, the useful specifics, the real examples, the data, and the topic stance the article takes.
 - PRESERVE every shortcode (e.g. [content_featured_image] and other [bracketed] tags), table, embed and link exactly as written unless it is clearly wrong — these often earn money or perform a function, and losing them is the worst outcome of a refresh.
 - Keep the important entities, product names, brand names and specific numbers that appear below; do not drift onto a different subject.
-- Then improve it: update anything dated, add the depth and fill the gaps the SERP outline identifies that this article currently misses, tighten weak or padded writing, and strengthen thin sections.
-- The result should read as a clearly better version of THIS article, not a different one.
+- Improve it: update anything dated, add the depth and fill the gaps the SERP outline identifies that this article currently misses, tighten weak or padded writing, and strengthen thin sections.
+- VOICE — this is not optional: the original's writing style is NOT a template to copy. Rewrite the whole article in the brand voice and writing style profile given above. Do not imitate the original's phrasing, sentence rhythm or punctuation habits, and do not fall back on generic AI mannerisms — in particular, do not pepper the text with em dashes unless the style profile explicitly calls for them. The article below is your source of facts and structure; the voice comes entirely from the style instructions above.
+- The result should read as a clearly better version of THIS article's content, written in the specified voice — not a stylistic copy of its prose.
 
 CURRENT ARTICLE:
 ${sourceContent}
@@ -380,7 +381,7 @@ ${styleProfileBlock}
 ${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}${refreshBlock}${internalLinkBlock}
 ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}${sourceContent ? `
 
-This is a REFRESH: the <existing_article_to_improve> block is the real article to improve, and the outline/structure describes the improved version to produce. Improve that article — keep its earning elements and specifics, do not discard it, and do not merely reformat it.` : ''}${hasPillar ? `
+This is a REFRESH: improve the CONTENT of the <existing_article_to_improve> article — update it, complete it, keep its earning elements and specifics — but write it entirely in the voice and style specified above, NOT in the original's voice and NOT in a generic AI voice. Improve the substance; own the style. Do not merely reformat the original.` : ''}${hasPillar ? `
 
 The <internal_link> instruction is MANDATORY and must be followed exactly once. It does not override the brand voice — the link must read as a natural part of the writing.` : ''}`;
 
