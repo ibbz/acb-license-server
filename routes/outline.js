@@ -93,11 +93,12 @@ router.post('/', async (req, res) => {
     // outline proxy in ai-content-bridge.php) purely for cost attribution.
     // Older builds omit them — the cost row is still written, unattributed
     // (license_key_id NULL; see add-cost-columns.sql). Never gate on them.
-    const { keyword, title, serp_gl, serp_hl, license_key, domain } = req.body || {};
+    const { keyword, title, serp_gl, serp_hl, license_key, domain, source_content } = req.body || {};
     const kw = (keyword || title || '').trim();
     if (!kw) {
         return res.status(400).json({ success: false, error: 'keyword or title is required' });
     }
+    const refreshSource = String(source_content || '').trim();
 
     // Cost context — the outline is FREE to the user (credits are taken at
     // generation) but it spends real Anthropic + Serper money on every run.
@@ -134,7 +135,15 @@ router.post('/', async (req, res) => {
         }
 
         // 2. structured outline from Claude
-        const prompt  = serp.buildOutlinePrompt(kw, title, ground);
+        let prompt  = serp.buildOutlinePrompt(kw, title, ground);
+        // AICOBR_REFRESH_2026_08 — when refreshing an existing post, give the
+        // outliner the current article so the outline IMPROVES it: keep the
+        // sections that work, and specifically add the gaps the SERP shows
+        // competitors covering that this article currently misses.
+        if (refreshSource) {
+            prompt += `\n\n---\n\nThis is a REFRESH of an existing published article. Below is its CURRENT content. Produce an outline for an IMPROVED version of THIS article: keep the sections and angles that already work, drop or merge weak/redundant ones, and — most importantly — add the topics and questions the SERP data above shows competitors covering that this article is currently missing. In "content_gap", name what this specific article most needs to add to compete. Do not propose a generic outline that ignores what the article already does well.\n\nCURRENT ARTICLE:\n${refreshSource}`;
+            console.log('[outline] Refresh mode — outline informed by existing article');
+        }
         const { text: rawText, truncated, usage, stop_reason } = await callClaude(prompt);
         costCtx.usage       = usage;
         costCtx.stop_reason = stop_reason;

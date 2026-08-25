@@ -231,6 +231,7 @@ async function generateContent(payload, costCtx) {
         approved_outline, serp_gl, serp_hl,
         cluster_pillar,
         suggestion_count,
+        source_content,   // AICOBR_REFRESH_2026_08 — the existing post being refreshed
     } = payload;
 
     // Build the user prompt using the content type template
@@ -340,6 +341,32 @@ Rules:
         console.log(`[generate] Cluster spoke — linking up to pillar: ${pillarTitle} (${pillarUrl})`);
     }
 
+    // ── Refresh: improve an existing article (AICOBR_REFRESH_2026_08) ─────────
+    // When source_content is present this is a REFRESH, not a fresh write. The
+    // SERP-grounded outline/template above still defines the TARGET; the block
+    // below is the BASE to improve. Framed as improvement so the model updates
+    // and completes the real article rather than producing a look-alike, and so
+    // it preserves the elements that earn (shortcodes, tables, links, specifics).
+    const sourceContent = String(source_content || '').trim();
+    const refreshBlock = sourceContent ? `
+<existing_article_to_improve>
+This is a REFRESH of an article that is already published. Your task is NOT to write a brand-new article — it is to produce an improved, updated, more complete and more competitive version of the article below, using the outline/structure above as the target shape.
+
+How to refresh it well:
+- Read it first and keep what already works: accurate facts, useful specifics, real examples, the author's angle and intent.
+- PRESERVE every shortcode (e.g. [content_featured_image] and other [bracketed] tags), table, embed and link exactly as written unless it is clearly wrong — these often earn money or perform a function, and losing them is the worst outcome of a refresh.
+- Keep the important entities, product names, brand names and specific numbers that appear below; do not drift onto a different subject.
+- Then improve it: update anything dated, add the depth and fill the gaps the SERP outline identifies that this article currently misses, tighten weak or padded writing, and strengthen thin sections.
+- The result should read as a clearly better version of THIS article, not a different one.
+
+CURRENT ARTICLE:
+${sourceContent}
+</existing_article_to_improve>
+` : '';
+    if (sourceContent) {
+        console.log(`[generate] Refresh mode — improving existing article (${sourceContent.length} chars of source)`);
+    }
+
     const systemPrompt = `You are an expert content writer and brand voice specialist.
 
 <brand_voice>
@@ -350,8 +377,10 @@ ${brand_voice || '{"voice": "Professional yet approachable"}'}
 ${tone || 'professional'}
 </tone>
 ${styleProfileBlock}
-${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}${internalLinkBlock}
-${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}${hasPillar ? `
+${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}${refreshBlock}${internalLinkBlock}
+${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}${sourceContent ? `
+
+This is a REFRESH: the <existing_article_to_improve> block is the real article to improve, and the outline/structure describes the improved version to produce. Improve that article — keep its earning elements and specifics, do not discard it, and do not merely reformat it.` : ''}${hasPillar ? `
 
 The <internal_link> instruction is MANDATORY and must be followed exactly once. It does not override the brand voice — the link must read as a natural part of the writing.` : ''}`;
 
