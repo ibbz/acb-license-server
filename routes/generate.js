@@ -565,6 +565,10 @@ router.post('/', async (req, res) => {
         // 1-credit generation happens.
         suggest_images,
         image_suggestion_count,
+        // AICOBR_REFRESH_2026_08 — original post body sent by the plugin on a refresh.
+        // Was never read here, so the refresh block in generateContent (style-precedence
+        // over the original's voice + "improve, don't reformat") never fired.
+        source_content,
         // Round-tripped back to /publish so WordPress matches the exact diary entry
         entry_id,
     } = req.body;
@@ -784,6 +788,7 @@ router.post('/', async (req, res) => {
             content_type, content_type_meta,
             approved_outline, serp_gl, serp_hl,
             cluster_pillar,
+            source_content,   // AICOBR_REFRESH_2026_08 — restore refresh mode (was dropped here)
             suggestion_count: suggestionCount,
         }, costCtx);
         // Attach a handler immediately. generateContent can reject *before* its first
