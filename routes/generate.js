@@ -281,6 +281,27 @@ async function generateContent(payload, costCtx) {
         }
     }
 
+    // AICOBR_STYLE_TINT_2026_09 — a style profile reaches the model in the system
+    // prompt, but the large SEO/structure brief in this user turn otherwise pulls the
+    // prose back to a neutral blog voice. Re-assert the voice as the LAST thing the
+    // model reads (its highest-weight position), and reconcile it with the answer-shape
+    // and readability rules so the voice expresses WITHIN the SEO structure rather than
+    // being flattened out. "Tint" mode: keep the shape, strengthen the voice inside it.
+    if (style_profile?.profile) {
+        userPrompt += `
+
+---
+
+**VOICE — read this last; it governs how every sentence sounds.**
+Write this entire article in the voice defined by the <writing_style_profile> in the system prompt (${style_profile.name || 'the active profile'}): its voice, tone, sentence rhythm and signature moves. That distinctive voice is the point of this piece; a reader should recognise it from the first line.
+
+Keep every structural and SEO rule above: the outline, the answer-first ordering, the Key Takeaways, the FAQ, the heading structure and the SEO_DATA block. Deliver them in this voice rather than a neutral generic-blog voice:
+- Answer-first still applies, but write that opening answer IN this voice; do not flatten it into bland "plain language".
+- Keep it readable, but readability is a goal, not a cap: when it conflicts with the voice, the voice wins over hitting a readability score.
+- Headings, Key Takeaways and FAQ answers should sound like this voice too, not like a neutral template.
+Structure it exactly as the rules above require; phrase every sentence as this voice would.`;
+    }
+
     // Build system prompt — includes brand voice, tone, and active style profile
     const styleProfileBlock = style_profile?.profile ? `
 <writing_style_profile name="${style_profile.name || 'Custom'}">
@@ -368,16 +389,23 @@ ${sourceContent}
         console.log(`[generate] Refresh mode — improving existing article (${sourceContent.length} chars of source)`);
     }
 
-    const systemPrompt = `You are an expert content writer and brand voice specialist.
-
-<brand_voice>
+    // AICOBR_STYLE_TINT_2026_09 — when a style profile is active it is the sole voice
+    // authority. A generic <brand_voice>/<tone> above it (the "Professional yet
+    // approachable" default, or a neutral configured voice) contradicts the profile
+    // and, printed first, tends to win. Suppress them while a profile is active; keep
+    // them as the voice source when there is no profile.
+    const voiceContextBlock = style_profile?.profile ? '' : `<brand_voice>
 ${brand_voice || '{"voice": "Professional yet approachable"}'}
 </brand_voice>
 
 <tone>
 ${tone || 'professional'}
 </tone>
-${styleProfileBlock}
+`;
+
+    const systemPrompt = `You are an expert content writer and brand voice specialist.
+
+${voiceContextBlock}${styleProfileBlock}
 ${special_instructions ? `<special_instructions>\n${special_instructions}\n</special_instructions>\n` : ''}${refreshBlock}${internalLinkBlock}
 ${style_profile?.profile ? `The writing style profile above is CRITICAL. Every sentence must authentically reflect the voice, tone, sentence structure and signature moves described. Readers should feel they are reading content written in that specific style.` : `The brand voice, tone, and special instructions above are MANDATORY. They override any default writing tendencies you have. Before writing, internalise them completely — every sentence must reflect them.`}${sourceContent ? `
 
